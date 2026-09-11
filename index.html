@@ -1,0 +1,2271 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>MOMO AI</title>
+
+<!-- ==== PWA: biar bisa "Tambahkan ke Layar Utama" & dibuka kayak app asli ==== -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" href="icon-192.png" type="image/png">
+<!-- iOS/Safari: dukungan "Add to Home Screen" -->
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MOMO">
+<style>
+  :root{
+    --bg:#05070a; --panel:#0d1218; --line:#1b232c;
+    --eye:#7fe7ff; --eye-glow:#7fe7ffaa; --accent:#ff9f6b;
+    --ok:#6bffa0; --warn:#ffcf6b;
+    --armor:#2b333c; --armor-light:#586572; --armor-dark:#0f1317; --crest:#e8c765;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body{
+    margin:0; padding:0; height:100%; overflow:hidden;
+    background: radial-gradient(120% 120% at 50% 20%, #10161d 0%, var(--bg) 60%);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    touch-action:none; color:#cfe3ee;
+  }
+  #stage{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas{ display:block; }
+
+  /* ---- Bar atas ---- */
+  #topbar{
+    position:fixed; top:0; left:0; right:0;
+    display:flex; flex-wrap:wrap; row-gap:4px; justify-content:space-between; align-items:center;
+    padding:14px 18px; color:#4c5b68; font-size:12px; letter-spacing:.3px;
+    pointer-events:none; z-index:5;
+  }
+  #topbar > div:first-child{ flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #motorHUD, #clock{ flex:0 0 auto; }
+  #topbar span.dot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-right:6px; vertical-align:middle; }
+  #topbar span.dot.bt-on{ background:var(--ok); box-shadow:0 0 6px var(--ok); }
+
+  /* ---- Indikator motor penggerak (maju/mundur) & motor kendali (kiri/kanan) ---- */
+  #motorHUD{ display:flex; gap:14px; font-size:11px; color:#4c5b68; }
+  .motorChip{ display:inline-flex; align-items:center; gap:5px; transition:color .2s; }
+  .motorChip.active{ color:var(--eye); }
+  .motorChip.active.rev{ color:var(--accent); }
+  .motorIcon{ display:inline-block; font-size:12px; transition:transform .15s, color .15s; }
+  .motorIcon.bounceFwd{ animation:motorBounceFwd .5s ease-in-out infinite; }
+  .motorIcon.bounceRev{ animation:motorBounceRev .5s ease-in-out infinite; }
+  .motorIcon.tiltLeft{ animation:motorTiltLeft .5s ease-in-out infinite alternate; }
+  .motorIcon.tiltRight{ animation:motorTiltRight .5s ease-in-out infinite alternate; }
+  @keyframes motorBounceFwd{ 0%,100%{ transform:translateY(1px); } 50%{ transform:translateY(-3px); } }
+  @keyframes motorBounceRev{ 0%,100%{ transform:translateY(-1px); } 50%{ transform:translateY(3px); } }
+  @keyframes motorTiltLeft{ from{ transform:rotate(0deg); } to{ transform:rotate(-24deg); } }
+  @keyframes motorTiltRight{ from{ transform:rotate(0deg); } to{ transform:rotate(24deg); } }
+  @media (max-width:420px){
+    #motorHUD{ gap:8px; }
+    .motorChip .label{ display:none; } /* layar sempit: sisakan ikon saja biar tidak tabrakan sama jam/status */
+  }
+
+  /* ---- Badge perintah (muncul sesaat saat perintah dikenali) ---- */
+  #cmdBadge{
+    position:fixed; top:54px; left:50%; transform:translateX(-50%) translateY(-8px);
+    background:rgba(13,18,24,0.9); border:1px solid rgba(127,231,255,0.3);
+    padding:8px 16px; border-radius:20px; font-size:13px; color:var(--eye);
+    opacity:0; transition:opacity .25s, transform .25s; pointer-events:none; z-index:6;
+  }
+  #cmdBadge.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #cmdBadge.warn{ color:var(--warn); border-color:rgba(255,207,107,0.35); }
+
+  /* ---- Hint bawah ---- */
+  #hint{
+    position:fixed; bottom:96px; left:0; right:0; text-align:center;
+    color:#3a4650; font-size:11px; pointer-events:none; z-index:4;
+  }
+
+  /* ---- Pil navigasi/kompas hidup ---- */
+  #navBar{
+    position:fixed; top:54px; left:50%; transform:translateX(-50%);
+    background:rgba(13,18,24,0.92); border:1px solid rgba(127,231,255,0.3);
+    padding:8px 10px 8px 16px; border-radius:20px; font-size:12.5px; color:var(--eye);
+    display:none; align-items:center; gap:10px; z-index:26; max-width:86vw;
+  }
+  #navBar.show{ display:flex; }
+  #navBar .navTxt{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #navBar .navDist{ color:#9db2c2; font-size:11px; }
+  #navBar button{
+    background:rgba(127,231,255,0.12); border:1px solid rgba(127,231,255,0.3); color:var(--eye);
+    width:24px; height:24px; border-radius:50%; font-size:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  }
+  #compassPermBar{
+    position:fixed; top:100px; left:50%; transform:translateX(-50%);
+    background:rgba(255,207,107,0.12); border:1px solid rgba(255,207,107,0.35);
+    padding:9px 14px; border-radius:14px; font-size:12px; color:var(--warn);
+    display:none; align-items:center; gap:10px; z-index:26; text-align:center;
+  }
+  #compassPermBar.show{ display:flex; }
+  #compassPermBar button{
+    background:rgba(255,207,107,0.18); border:1px solid rgba(255,207,107,0.4); color:var(--warn);
+    padding:6px 12px; border-radius:10px; font-size:12px; flex-shrink:0;
+  }
+
+  /* ---- Indikator lagi merekam video ---- */
+  #recIndicator{
+    position:fixed; top:100px; left:50%; transform:translateX(-50%);
+    background:rgba(255,90,90,0.14); border:1px solid rgba(255,90,90,0.4);
+    color:#ff8080; font-size:12px; padding:7px 14px; border-radius:14px;
+    display:none; align-items:center; gap:6px; z-index:27;
+  }
+  #recIndicator.show{ display:flex; }
+  #recIndicator .dot{ width:8px; height:8px; border-radius:50%; background:#ff5a5a; animation:recBlink 1s infinite; }
+  @keyframes recBlink{ 0%,100%{ opacity:1; } 50%{ opacity:0.25; } }
+  /* ---- Mode fokus (hitung mundur sebelum jepret foto / mulai rekam video) ---- */
+  #recIndicator.focus{ background:rgba(255,159,107,0.14); border-color:rgba(255,159,107,0.4); color:var(--accent); }
+  #recIndicator.focus .dot{ background:var(--accent); animation:none; }
+
+  /* ---- Preview foto/video hasil jepretan MOMO ---- */
+  #mediaPreview{
+    position:fixed; inset:0; background:rgba(3,5,8,0.92); z-index:70;
+    display:none; align-items:center; justify-content:center; flex-direction:column; gap:16px;
+  }
+  #mediaPreview.open{ display:flex; }
+  #mediaPreview img, #mediaPreview video{
+    max-width:92vw; max-height:68vh; border-radius:16px; border:1px solid var(--line);
+    background:#000;
+  }
+  #mediaPreviewBtns{ display:flex; gap:12px; }
+  #mediaPreviewBtns button{
+    background:var(--panel); border:1px solid var(--line); color:var(--eye);
+    padding:10px 18px; border-radius:12px; font-size:13px;
+  }
+  #mediaPreviewBtns #mediaDownloadBtn{ color:var(--ok); border-color:rgba(107,255,160,0.4); }
+
+
+  /* ---- Kontrol bawah kanan ---- */
+  #controls{
+    position:fixed; bottom:20px; right:16px; display:flex; flex-direction:column; gap:10px; z-index:30;
+  }
+  .ctrlBtn{
+    width:48px; height:48px; border-radius:50%; background:var(--panel);
+    border:1px solid var(--line); color:var(--eye); font-size:18px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .ctrlBtn.on{ box-shadow:0 0 0 6px rgba(127,231,255,0.12); color:#fff; border-color:rgba(127,231,255,0.4); }
+  .ctrlBtn.bt.on{ box-shadow:0 0 0 6px rgba(107,255,160,0.12); color:var(--ok); border-color:rgba(107,255,160,0.4); }
+
+  /* ---- Panel geser (transkrip, riwayat, kata kunci) ---- */
+  #panel{
+    position:fixed; left:0; right:0; bottom:0;
+    background:#0a0e13; border-top:1px solid var(--line);
+    border-radius:20px 20px 0 0;
+    transform:translateY(100%); transition:transform .28s ease;
+    max-height:72vh; overflow-y:auto; padding:14px 16px 26px; z-index:20;
+  }
+  #panel.open{ transform:translateY(0); }
+  #panelHandle{ width:36px; height:4px; background:#243040; border-radius:3px; margin:0 auto 14px; }
+
+  #transcriptBox{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:12px 14px; min-height:44px; font-size:14px; color:#e8f4fa; margin-bottom:12px;
+  }
+  #transcriptBox .placeholder{ color:#3a4650; font-size:12px; }
+
+  label.wake{ display:flex; align-items:center; gap:8px; font-size:12px; color:#9db2c2; padding:2px 2px 14px; }
+
+  h2.section{ font-size:11px; color:#4c5b68; margin:14px 0 8px; font-weight:600; }
+
+  .kwGrid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:6px; }
+  .kwCard{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .kwCard .k{ font-size:10px; color:#4c5b68; }
+  .kwCard .v{ font-size:12px; color:#cfe3ee; margin-top:1px; }
+  .kwCard .v b{ color:var(--eye); }
+
+  #log{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:6px 2px; max-height:150px; overflow-y:auto; }
+  #log .entry{ display:flex; justify-content:space-between; gap:10px; padding:7px 10px; font-size:11px; border-bottom:1px solid var(--line); }
+  #log .entry:last-child{ border-bottom:none; }
+  #log .entry .txt{ color:#9db2c2; }
+  #log .entry .cmd{ color:var(--eye); font-weight:700; }
+  #log .entry.unmatched .cmd{ color:#4c5b68; }
+  #log .empty{ text-align:center; color:#3a4650; font-size:11px; padding:12px; }
+
+  /* ---- D-pad kontrol manual ---- */
+  #dpad{
+    position:fixed; left:16px; bottom:20px; z-index:30;
+    display:none; grid-template-columns:48px 48px 48px; grid-template-rows:48px 48px 48px;
+    gap:6px;
+  }
+  #dpad.show{ display:grid; }
+  #dpad button{
+    background:var(--panel); border:1px solid var(--line); color:var(--eye);
+    font-size:18px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+    padding:0;
+  }
+  #dpad button:active{ box-shadow:0 0 0 6px rgba(127,231,255,0.12); color:#fff; border-color:rgba(127,231,255,0.4); }
+  #dpad button.stop{ color:var(--accent); }
+  #dpad button.stop:active{ box-shadow:0 0 0 6px rgba(255,159,107,0.15); border-color:rgba(255,159,107,0.4); }
+  #dpad .f{ grid-column:2; grid-row:1; }
+  #dpad .l{ grid-column:1; grid-row:2; }
+  #dpad .s{ grid-column:2; grid-row:2; }
+  #dpad .r{ grid-column:3; grid-row:2; }
+  #dpad .b{ grid-column:2; grid-row:3; }
+
+  #banner{
+    display:none; background:rgba(255,207,107,0.08); border:1px solid rgba(255,207,107,0.25);
+    color:var(--warn); font-size:11px; padding:9px 11px; border-radius:10px; margin-bottom:12px; line-height:1.4;
+  }
+
+  /* ---- Mode koneksi: Bluetooth (dekat) vs WiFi/Internet (jauh) ---- */
+  .connGrid{ display:flex; gap:8px; margin-bottom:12px; }
+  .connBtn{ flex:1; background:var(--panel); border:1px solid var(--line); color:#9db2c2; padding:10px 6px; border-radius:10px; font-size:11.5px; line-height:1.3; }
+  .connBtn.active{ color:var(--eye); border-color:rgba(127,231,255,0.4); box-shadow:0 0 0 3px rgba(127,231,255,0.12); }
+  #robotIdRow{ margin-bottom:14px; }
+  #robotIdRow label{ display:block; font-size:11px; color:#9db2c2; margin-bottom:6px; line-height:1.4; }
+  #robotIdRow input{ width:100%; background:var(--panel); border:1px solid var(--line); color:#e8f4fa; padding:9px 10px; border-radius:8px; font-size:13px; }
+
+  /* ---- Aksesori: mode kecepatan + lampu/klakson/sirine ---- */
+  #accessory{ position:fixed; left:0; right:0; bottom:132px; display:flex; flex-direction:column; align-items:center; gap:8px; z-index:25; pointer-events:none; }
+  #accessory > *{ pointer-events:auto; }
+  .speedSeg{ display:flex; background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .speedSeg button{ background:transparent; border:none; color:#9db2c2; font-size:11px; padding:7px 14px; }
+  .speedSeg button.active{ background:rgba(127,231,255,0.14); color:var(--eye); }
+  .accBtns{ display:flex; gap:12px; }
+  .accBtns button{ width:46px; height:46px; border-radius:50%; background:var(--panel); border:1px solid var(--line); font-size:18px; display:flex; align-items:center; justify-content:center; color:#cfe3ee; }
+  .accBtns button.on{ box-shadow:0 0 0 6px rgba(255,207,107,0.15); border-color:rgba(255,207,107,0.4); color:var(--warn); }
+  #camSwitchBtn{ font-size:15px !important; }
+  #camSwitchBtn.front{ color:var(--eye); border-color:rgba(127,231,255,0.4); box-shadow:0 0 0 6px rgba(127,231,255,0.12); }
+  #sirenBtn.on{ animation:sirenPulse 0.6s infinite alternate; }
+  @keyframes sirenPulse{
+    from{ box-shadow:0 0 0 4px rgba(255,99,99,0.18); border-color:rgba(255,99,99,0.5); }
+    to{ box-shadow:0 0 0 11px rgba(255,99,99,0.04); border-color:rgba(255,99,99,0.5); }
+  }
+
+  /* ---- Asisten AI (chat + kendali via Gemini) ---- */
+  .ctrlBtn.ai.on{ box-shadow:0 0 0 6px rgba(179,136,255,0.18); color:#b388ff; border-color:rgba(179,136,255,0.45); }
+  #aiChat{
+    position:fixed; left:0; right:0; bottom:0; top:0;
+    background:#0a0e13; z-index:60; display:none; flex-direction:column;
+  }
+  #aiChat.open{ display:flex; }
+  #aiChatHeader{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border-bottom:1px solid var(--line); color:#e8f4fa; font-size:14px; font-weight:600;
+  }
+  #aiChatHeader div.btns{ display:flex; gap:8px; }
+  #aiChatHeader button{ background:var(--panel); border:1px solid var(--line); color:#9db2c2; width:34px; height:34px; border-radius:50%; font-size:14px; }
+
+  #aiChatSetup{ padding:18px 20px; overflow-y:auto; }
+  #aiChatSetup p{ font-size:13px; color:#9db2c2; line-height:1.6; }
+  #aiChatSetup ol{ font-size:13px; color:#9db2c2; line-height:1.8; padding-left:20px; }
+  #aiChatSetup a{ color:var(--eye); }
+  .aiKeyLabel{ display:block; font-size:12px; color:#7f95a5; margin-bottom:4px; }
+  #aiApiKeyInput, #groqApiKeyInput{
+    width:100%; background:var(--panel); border:1px solid var(--line); color:#e8f4fa;
+    padding:11px 12px; border-radius:10px; font-size:13px; margin:0 0 4px 0;
+  }
+  #aiApiKeySaveBtn{
+    width:100%; background:rgba(127,231,255,0.14); border:1px solid rgba(127,231,255,0.4); color:var(--eye);
+    padding:12px; border-radius:10px; font-size:13px; font-weight:600; margin-top:14px;
+  }
+  .aiNote{ font-size:11px !important; color:#4c5b68 !important; margin-top:10px; }
+
+  #aiChatBody{ flex:1; display:none; flex-direction:column; min-height:0; }
+  #aiChatBody.show{ display:flex; }
+  #aiChatLog{ flex:1; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+  .aiMsg{ max-width:82%; padding:10px 13px; border-radius:14px; font-size:13.5px; line-height:1.5; }
+  .aiMsg.user{ align-self:flex-end; background:rgba(127,231,255,0.14); color:#e8f4fa; border-bottom-right-radius:4px; }
+  .aiMsg.ai{ align-self:flex-start; background:var(--panel); border:1px solid var(--line); color:#e8f4fa; border-bottom-left-radius:4px; }
+  .aiMsg.system{ align-self:center; background:transparent; color:#6b8090; font-size:11.5px; padding:4px 10px; }
+  #aiTyping{ padding:0 16px 8px; font-size:11.5px; color:#6b8090; display:none; }
+  #aiChatInputRow{ display:flex; gap:8px; padding:12px 14px 18px; border-top:1px solid var(--line); }
+  #aiChatInput{
+    flex:1; background:var(--panel); border:1px solid var(--line); color:#e8f4fa;
+    padding:11px 14px; border-radius:22px; font-size:13.5px;
+  }
+  #aiChatMicBtn, #aiChatSendBtn{
+    width:42px; height:42px; border-radius:50%; background:var(--panel); border:1px solid var(--line);
+    color:var(--eye); font-size:16px; flex-shrink:0;
+  }
+  #aiChatMicBtn.on{ box-shadow:0 0 0 5px rgba(255,99,99,0.15); border-color:rgba(255,99,99,0.4); color:#ff6363; }
+
+  /* ---- Penyesuaian saat HP posisi landscape (layar pendek) ---- */
+  @media (orientation:landscape) and (max-height:500px){
+    #dpad{ transform:scale(0.82); transform-origin:bottom left; }
+    #controls{ transform:scale(0.82); transform-origin:bottom right; gap:7px; }
+    #accessory{ bottom:96px; }
+    #hint{ bottom:74px; }
+    #panel{ max-height:92vh; }
+    #aiChatLog{ padding:10px 16px; }
+  }
+  @media (orientation:landscape) and (max-width:900px){
+    #stage{ padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div><span class="dot" id="btDot"></span>MOMO · <span id="btStatus">BLE terputus</span></div>
+  <div id="motorHUD">
+    <span class="motorChip" id="motorDriveChip" title="Motor penggerak (maju/mundur)"><span class="motorIcon" id="driveIcon">▲</span><span class="label">Penggerak</span></span>
+    <span class="motorChip" id="motorSteerChip" title="Motor kendali (kiri/kanan)"><span class="motorIcon" id="steerIcon">↔</span><span class="label">Kendali</span></span>
+  </div>
+  <div id="clock">--:--</div>
+</div>
+
+<div id="cmdBadge"></div>
+<div id="navBar">
+  <span id="navCompass">🧭</span>
+  <span class="navTxt" id="navTxt">Menuju...</span>
+  <span class="navDist" id="navDist"></span>
+  <button id="navStopBtn" title="Berhenti navigasi">✕</button>
+</div>
+<div id="compassPermBar">
+  <span>MOMO butuh izin kompas HP buat nunjukin arah</span>
+  <button id="compassPermBtn">Aktifkan</button>
+</div>
+<div id="recIndicator"><span class="dot"></span><span id="recIndicatorTxt">Merekam...</span></div>
+<div id="hint">Ngomong "MOMO..." kapan aja · Tap layar = ganti ekspresi · Seret = mata mengikuti</div>
+
+<video id="camVideo" playsinline muted style="display:none;"></video>
+<canvas id="camCanvas" style="display:none;"></canvas>
+
+<div id="mediaPreview">
+  <img id="mediaPreviewImg" style="display:none;">
+  <video id="mediaPreviewVideo" controls playsinline style="display:none;"></video>
+  <div id="mediaPreviewBtns">
+    <button id="mediaDownloadBtn">⬇️ Simpan</button>
+    <button id="mediaCloseBtn">✕ Tutup</button>
+  </div>
+</div>
+
+<div id="stage"><canvas id="face"></canvas></div>
+
+<div id="controls">
+  <button class="ctrlBtn mic" id="micBtn" title="Mikrofon (aktif otomatis — tekan buat bisukan)">🎤</button>
+  <button class="ctrlBtn bt" id="btBtn" title="Bluetooth">BT</button>
+  <button class="ctrlBtn ai" id="aiBtn" title="Chat &amp; pengaturan AI (ngobrol langsung tanpa buka ini juga bisa)">🤖</button>
+  <button class="ctrlBtn" id="manualBtn" title="Kontrol manual">🕹️</button>
+  <button class="ctrlBtn" id="panelBtn" title="Detail">☰</button>
+</div>
+
+<div id="dpad">
+  <button class="f" id="dpF" title="Maju">▲</button>
+  <button class="l" id="dpL" title="Kiri">◀</button>
+  <button class="s stop" id="dpS" title="Stop">■</button>
+  <button class="r" id="dpR" title="Kanan">▶</button>
+  <button class="b" id="dpB" title="Mundur">▼</button>
+</div>
+
+<div id="accessory">
+  <div class="speedSeg" id="speedSeg">
+    <button data-speed="1">Pelan</button>
+    <button data-speed="2" class="active">Sedang</button>
+    <button data-speed="3">Cepat</button>
+  </div>
+  <div class="accBtns">
+    <button id="lampBtn" title="Lampu">💡</button>
+    <button id="hornBtn" title="Klakson">📯</button>
+    <button id="sirenBtn" title="Sirine">🚨</button>
+    <button id="camSwitchBtn" title="Ganti kamera depan/belakang">🔄</button>
+    <button id="camBtn" title="Ambil foto (kamera belakang)">📷</button>
+    <button id="vidBtn" title="Rekam video (kamera belakang)">🎥</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div id="panelHandle"></div>
+  <div id="banner"></div>
+
+  <h2 class="section">MODE KONEKSI</h2>
+  <div class="connGrid" id="connGrid">
+    <button class="connBtn" data-mode="ble" id="modeBleBtn">📶 Bluetooth<br>(jarak dekat)</button>
+    <button class="connBtn" data-mode="mqtt" id="modeMqttBtn">🌐 WiFi / Internet<br>(jarak jauh)</button>
+  </div>
+  <div id="robotIdRow">
+    <label>ID Robot (isi sama persis dengan yang diatur saat setup WiFi di ESP32):</label>
+    <input type="text" id="robotIdInput" placeholder="contoh: momo01">
+  </div>
+
+  <label class="wake">
+    <input type="checkbox" id="wakeToggle">
+    Butuh kata "MOMO" sebelum perintah dieksekusi
+  </label>
+
+  <div id="transcriptBox"><span class="placeholder">Ucapan Anda akan muncul di sini…</span></div>
+
+  <h2 class="section">KATA KUNCI</h2>
+  <div class="kwGrid" id="kwGrid"></div>
+
+  <h2 class="section">RIWAYAT PERINTAH</h2>
+  <div id="log"><div class="empty">Belum ada riwayat</div></div>
+</div>
+
+<div id="aiChat">
+  <div id="aiChatHeader">
+    <span>🤖 Asisten AI MOMO</span>
+    <div class="btns">
+      <button id="aiVoiceBtn" title="Suara balasan AI">🔊</button>
+      <button id="aiChatSettingsBtn" title="Ganti API Key">⚙️</button>
+      <button id="aiChatCloseBtn" title="Tutup">✕</button>
+    </div>
+  </div>
+
+  <div id="aiChatSetup">
+    <p>Ngobrol &amp; perintah robot pakai AI (Gemini, gratis, tanpa kartu kredit). Isi API Key Gemini dulu, baru bisa mulai ngobrol — Groq bersifat cadangan/opsional, boleh dikosongkan:</p>
+    <ol>
+      <li>Buka <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, login pakai akun Google, tekan "Create API key", copy key-nya (diawali "AIza...").</li>
+      <li>Tempel key itu di kolom "API Key Gemini" di bawah, lalu tekan Simpan — sudah bisa langsung ngobrol.</li>
+      <li>(Opsional) Kalau mau ada cadangan otomatis saat Gemini gagal/kuota habis, buka <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>, buat API key (diawali "gsk_..."), lalu tempel juga di kolom Groq.</li>
+    </ol>
+    <label class="aiKeyLabel">API Key Gemini (wajib)</label>
+    <input type="password" id="aiApiKeyInput" placeholder="Tempel API Key Gemini di sini">
+    <label class="aiKeyLabel" style="margin-top:10px;">API Key Groq (opsional, cadangan)</label>
+    <input type="password" id="groqApiKeyInput" placeholder="Kosongkan saja kalau tidak perlu cadangan">
+    <button id="aiApiKeySaveBtn">Simpan &amp; Mulai Ngobrol</button>
+    <p class="aiNote">Key cuma tersimpan di HP kamu sendiri (browser), langsung dipakai ngobrol ke server Google/Groq, tidak lewat server lain. Kalau kolom Groq diisi, MOMO otomatis pindah ke Groq setiap kali Gemini gagal/kuota penuh.</p>
+  </div>
+
+  <div id="aiChatBody">
+    <div id="aiChatLog"></div>
+    <div id="aiTyping">MOMO sedang mengetik...</div>
+    <div id="aiChatInputRow">
+      <input type="text" id="aiChatInput" placeholder="Ketik atau ngomong ke MOMO...">
+      <button id="aiChatMicBtn" title="Ngomong">🎤</button>
+      <button id="aiChatSendBtn" title="Kirim">➤</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.15.2/mqtt.min.js"></script>
+<script>
+(function(){
+  /* ======================================================
+     BAGIAN 1 — WAJAH ANIMASI (canvas)
+     ====================================================== */
+  const canvas = document.getElementById('face');
+  const ctx = canvas.getContext('2d');
+  let W, H, DPR;
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  // Beberapa browser HP melaporkan innerWidth/innerHeight yang belum ter-update
+  // tepat saat event orientationchange ditembak, jadi resize diulang sesaat setelahnya.
+  window.addEventListener('orientationchange', ()=>{ resize(); setTimeout(resize, 200); setTimeout(resize, 500); });
+  if(window.screen && screen.orientation && screen.orientation.addEventListener){
+    screen.orientation.addEventListener('change', ()=> setTimeout(resize, 150));
+  }
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', resize);
+  }
+  resize();
+
+  const clockEl = document.getElementById('clock');
+  function tickClock(){
+    const d = new Date();
+    clockEl.textContent = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+  tickClock(); setInterval(tickClock, 15000);
+
+  const EXPR = ['normal','senang','kaget','sedih','ngantuk','cinta'];
+  let exprIndex = 0;
+  let expr = EXPR[0];
+
+  let lookX = 0, lookY = 0, lookTX = 0, lookTY = 0;
+  let blink = 0;
+  let nextBlinkAt = performance.now() + 1500 + Math.random()*2500;
+
+  // reaksi sesaat akibat perintah suara (menimpa look/mood biasa)
+  let reactUntil = 0, reactMood = null;
+  let reactLook = { x:0, y:0 };
+
+  let audioLevel = 0;
+  let micActive = false;
+  let audioCtx, analyser, dataArray, micStream;
+  let isSpeaking = false; // true selagi MOMO lagi ngomong (TTS) — dipakai buat animasi mulut & jeda mikrofon
+
+  let dragging = false;
+  function setLookFromPointer(x, y){
+    const cx = W/2, cy = H/2;
+    const maxR = Math.min(W,H) * 0.35;
+    let dx = (x - cx) / maxR, dy = (y - cy) / maxR;
+    const len = Math.hypot(dx,dy);
+    if(len > 1){ dx/=len; dy/=len; }
+    lookX = dx; lookY = dy;
+  }
+  canvas.addEventListener('pointerdown', (e)=>{ dragging = true; setLookFromPointer(e.clientX, e.clientY); });
+  window.addEventListener('pointermove', (e)=>{ if(dragging) setLookFromPointer(e.clientX, e.clientY); });
+  window.addEventListener('pointerup', ()=>{
+    if(dragging){
+      dragging = false;
+      exprIndex = (exprIndex + 1) % EXPR.length;
+      expr = EXPR[exprIndex];
+      triggerBlink();
+    }
+  });
+
+  function triggerBlink(){ blink = 0.001; }
+
+  let idleTimer = 0;
+  function updateIdleLook(dt){
+    idleTimer -= dt;
+    if(idleTimer <= 0 && !dragging){
+      lookTX = (Math.random()*2-1) * 0.6;
+      lookTY = (Math.random()*2-1) * 0.4;
+      idleTimer = 1.2 + Math.random()*2.2;
+    }
+    if(!dragging){ lookX += (lookTX - lookX) * 0.06; lookY += (lookTY - lookY) * 0.06; }
+  }
+
+  function roundRect(x,y,w,h,r){
+    r = Math.max(0, Math.min(r, Math.min(Math.abs(w),Math.abs(h))/2));
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+  function drawHeart(cx, cy, size){
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(size/40, size/40);
+    ctx.beginPath();
+    ctx.moveTo(0, 10);
+    ctx.bezierCurveTo(0,-4, -20,-6, -20,10);
+    ctx.bezierCurveTo(-20,22, 0,28, 0,34);
+    ctx.bezierCurveTo(0,28, 20,22, 20,10);
+    ctx.bezierCurveTo(20,-6, 0,-4, 0,10);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  function drawEye(cx, cy, baseW, baseH, lx, ly, blinkAmt, mood, glowAlpha, side){
+    ctx.save(); ctx.translate(cx, cy);
+    side = side || 1;
+    let w = baseW, h = baseH, offsetY = 0, tilt = side * -0.22; // sipit: visor tipis miring ke atas-luar
+    if(mood === 'senang'){ h = baseH * (0.5 - blinkAmt*0.45); }
+    else if(mood === 'kaget'){ w = baseW * 1.1; h = baseH * 2.1 * (1-blinkAmt); tilt = 0; }
+    else if(mood === 'sedih'){ h = baseH * (1-blinkAmt); tilt = side * 0.16; }
+    else if(mood === 'ngantuk'){ h = baseH * 0.45 * (1-blinkAmt*0.6); offsetY = baseH*0.15; }
+    else if(mood === 'cinta'){ h = baseH*1.4*(1-blinkAmt); }
+    else { h = baseH * (1-blinkAmt); }
+    ctx.rotate(tilt);
+    ctx.shadowColor = getComputedStyle(document.documentElement).getPropertyValue('--eye-glow');
+    ctx.shadowBlur = 28 * glowAlpha;
+    const grad = ctx.createLinearGradient(0,-h/2,0,h/2);
+    grad.addColorStop(0, '#bff5ff');
+    grad.addColorStop(1, getComputedStyle(document.documentElement).getPropertyValue('--eye'));
+    ctx.fillStyle = grad;
+    const px = lx * w * 0.18, py = ly * h * 0.18 + offsetY;
+    if(mood === 'cinta'){ drawHeart(px, py, Math.min(w,h)*0.9); }
+    else { roundRect(px - w/2, py - h/2, w, h, Math.min(w,h)/2); ctx.fill(); }
+    ctx.shadowBlur = 0; ctx.restore();
+  }
+
+  function drawMouth(cx, cy, mood, level){
+    ctx.save(); ctx.translate(cx, cy);
+    ctx.strokeStyle = 'rgba(127,231,255,0.55)'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    const open = Math.min(1, level * 2.2);
+    ctx.beginPath();
+    if(mood === 'senang'){ ctx.arc(0, -10, 34, 0.15*Math.PI, 0.85*Math.PI); }
+    else if(mood === 'sedih'){ ctx.arc(0, 22, 34, 1.15*Math.PI, 1.85*Math.PI); }
+    else if(mood === 'kaget'){
+      ctx.ellipse(0,0, 12+open*10, 14+open*16, 0, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(127,231,255,0.35)'; ctx.fill(); ctx.restore(); return;
+    } else {
+      const w = 46;
+      ctx.moveTo(-w/2, -open*10);
+      ctx.quadraticCurveTo(0, open*22, w/2, -open*10);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+
+  // ---- Bingkai kepala bergaya mecha (orisinal, bukan reproduksi karakter tertentu) ----
+  function drawHeadFrame(cx, cy, glowAlpha){
+    ctx.save(); ctx.translate(cx, cy);
+    const s = Math.min(W, H);
+    const armor = getComputedStyle(document.documentElement).getPropertyValue('--armor').trim();
+    const armorLight = getComputedStyle(document.documentElement).getPropertyValue('--armor-light').trim();
+    const armorDark = getComputedStyle(document.documentElement).getPropertyValue('--armor-dark').trim();
+    const crest = getComputedStyle(document.documentElement).getPropertyValue('--crest').trim();
+    const hw = s*0.42, hh = s*0.50;
+
+    // pelat kepala luar (siluet bersudut)
+    ctx.beginPath();
+    ctx.moveTo(-hw*0.55, -hh*0.92);
+    ctx.lineTo(hw*0.55, -hh*0.92);
+    ctx.lineTo(hw, -hh*0.25);
+    ctx.lineTo(hw*0.86, hh*0.55);
+    ctx.lineTo(hw*0.30, hh);
+    ctx.lineTo(-hw*0.30, hh);
+    ctx.lineTo(-hw*0.86, hh*0.55);
+    ctx.lineTo(-hw, -hh*0.25);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0,-hh,0,hh);
+    grad.addColorStop(0, armorLight);
+    grad.addColorStop(0.55, armor);
+    grad.addColorStop(1, armorDark);
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.lineWidth = s*0.006; ctx.strokeStyle = 'rgba(200,220,235,0.25)'; ctx.stroke();
+
+    // panel visor (rongga gelap tempat mata menyala)
+    ctx.beginPath();
+    ctx.moveTo(-hw*0.78, -hh*0.42);
+    ctx.lineTo(hw*0.78, -hh*0.42);
+    ctx.lineTo(hw*0.60, hh*0.16);
+    ctx.lineTo(-hw*0.60, hh*0.16);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(3,5,8,0.68)'; ctx.fill();
+
+    // garis detail rahang
+    ctx.strokeStyle = 'rgba(180,200,215,0.18)'; ctx.lineWidth = s*0.004;
+    ctx.beginPath();
+    ctx.moveTo(-hw*0.72, hh*0.55); ctx.lineTo(-hw*0.36, hh*0.80);
+    ctx.moveTo(hw*0.72, hh*0.55); ctx.lineTo(hw*0.36, hh*0.80);
+    ctx.stroke();
+
+    // sirip kembar di puncak kepala (bentuk sendiri, tidak meniru desain tertentu)
+    ctx.fillStyle = crest;
+    ctx.shadowColor = crest; ctx.shadowBlur = 14 * glowAlpha;
+    ctx.beginPath();
+    ctx.moveTo(-hw*0.48, -hh*0.86);
+    ctx.lineTo(-hw*1.22, -hh*1.5);
+    ctx.lineTo(-hw*0.60, -hh*1.0);
+    ctx.lineTo(-hw*0.16, -hh*0.9);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(hw*0.48, -hh*0.86);
+    ctx.lineTo(hw*1.22, -hh*1.5);
+    ctx.lineTo(hw*0.60, -hh*1.0);
+    ctx.lineTo(hw*0.16, -hh*0.9);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-hw*0.13, -hh*0.94);
+    ctx.lineTo(0, -hh*1.16);
+    ctx.lineTo(hw*0.13, -hh*0.94);
+    ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
+  // ---- Reaksi wajah terhadap perintah gerak ----
+  const REACT_MAP = {
+    F: { x:0,    y:-0.7, mood:'senang',  duration:1200 },
+    B: { x:0,    y:0.7,  mood:'normal',  duration:1200 },
+    L: { x:-0.9, y:0,    mood:'normal',  duration:1200 },
+    R: { x:0.9,  y:0,    mood:'normal',  duration:1200 },
+    S: { x:0,    y:0,    mood:'ngantuk', duration:900  },
+    '1': { x:0,  y:0.3,  mood:'ngantuk', duration:1300 }, // Pelan -> santai/loyo
+    '2': { x:0,  y:0,    mood:'normal',  duration:900  }, // Sedang -> ekspresi normal
+    '3': { x:0,  y:-0.5, mood:'kaget',   duration:1300 }, // Cepat -> semangat/kaget
+  };
+  function reactFaceTo(code){
+    const m = REACT_MAP[code]; if(!m) return;
+    reactLook.x = m.x; reactLook.y = m.y; reactMood = m.mood;
+    reactUntil = performance.now() + m.duration;
+    triggerBlink();
+    updateMotorHUD(code, m.duration);
+  }
+
+  // ---- Indikator motor penggerak (maju/mundur) & motor kendali (kiri/kanan) ----
+  const driveIcon = document.getElementById('driveIcon');
+  const steerIcon = document.getElementById('steerIcon');
+  const motorDriveChip = document.getElementById('motorDriveChip');
+  const motorSteerChip = document.getElementById('motorSteerChip');
+  let motorResetTimer = null;
+
+  function resetMotorHUD(){
+    driveIcon.textContent = '▲';
+    driveIcon.classList.remove('bounceFwd','bounceRev');
+    steerIcon.textContent = '↔';
+    steerIcon.classList.remove('tiltLeft','tiltRight');
+    motorDriveChip.classList.remove('active','rev');
+    motorSteerChip.classList.remove('active');
+  }
+
+  function updateMotorHUD(code, duration){
+    clearTimeout(motorResetTimer);
+    if(code === 'F'){ // Maju -> motor penggerak arah depan
+      driveIcon.textContent = '▲';
+      driveIcon.classList.add('bounceFwd'); driveIcon.classList.remove('bounceRev');
+      steerIcon.classList.remove('tiltLeft','tiltRight');
+      motorDriveChip.classList.add('active'); motorDriveChip.classList.remove('rev');
+      motorSteerChip.classList.remove('active');
+    } else if(code === 'B'){ // Mundur -> motor penggerak arah belakang
+      driveIcon.textContent = '▼';
+      driveIcon.classList.add('bounceRev'); driveIcon.classList.remove('bounceFwd');
+      steerIcon.classList.remove('tiltLeft','tiltRight');
+      motorDriveChip.classList.add('active','rev');
+      motorSteerChip.classList.remove('active');
+    } else if(code === 'L'){ // Kiri -> motor kendali/steering belok kiri
+      steerIcon.textContent = '◀';
+      steerIcon.classList.add('tiltLeft'); steerIcon.classList.remove('tiltRight');
+      driveIcon.classList.remove('bounceFwd','bounceRev');
+      motorSteerChip.classList.add('active');
+      motorDriveChip.classList.remove('active','rev');
+    } else if(code === 'R'){ // Kanan -> motor kendali/steering belok kanan
+      steerIcon.textContent = '▶';
+      steerIcon.classList.add('tiltRight'); steerIcon.classList.remove('tiltLeft');
+      driveIcon.classList.remove('bounceFwd','bounceRev');
+      motorSteerChip.classList.add('active');
+      motorDriveChip.classList.remove('active','rev');
+    } else if(code === 'S'){ // Stop -> kedua motor berhenti
+      resetMotorHUD();
+      return;
+    } else {
+      return; // kode lain (kecepatan/lampu/klakson/sirine) tidak memengaruhi indikator motor
+    }
+    motorResetTimer = setTimeout(resetMotorHUD, duration || 1000);
+  }
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.05, (now - last)/1000); last = now;
+
+    updateAudioLevel();
+
+    if(now >= nextBlinkAt && blink <= 0) blink = 0.001;
+    let blinkAmt = 0;
+    if(blink > 0){
+      blinkAmt = Math.sin(Math.min(1,blink) * Math.PI);
+      blink += dt * 6;
+      if(blink > 1.6){ blink = 0; nextBlinkAt = now + 1800 + Math.random()*3000; }
+    }
+
+    const reacting = now < reactUntil;
+    if(reacting){
+      lookX += (reactLook.x - lookX) * 0.25;
+      lookY += (reactLook.y - lookY) * 0.25;
+    } else if(navActive && navTarget && navHeading != null && typeof currentLat === 'number' && !dragging){
+      // Mode navigasi live: mata MOMO menghadap ke arah tujuan relatif terhadap arah hadap HP (kompas)
+      const bearingToTarget = calcBearing(currentLat, currentLon, navTarget.lat, navTarget.lon);
+      const rel = ((bearingToTarget - navHeading) % 360 + 360) % 360;
+      const rad = rel * Math.PI / 180;
+      const navLookX = Math.sin(rad) * 0.85;   // tujuan di kanan/kiri -> mata melirik kanan/kiri
+      const navLookY = -Math.cos(rad) * 0.55;  // tujuan di depan/belakang -> mata ke atas/bawah
+      lookX += (navLookX - lookX) * 0.08;
+      lookY += (navLookY - lookY) * 0.08;
+    } else {
+      updateIdleLook(dt);
+    }
+    const moodForDraw = reacting ? reactMood : (isSpeaking ? 'senang' : expr);
+
+    ctx.clearRect(0,0,W,H);
+    const cx = W/2, cy = H/2 - H*0.03;
+    const s = Math.min(W,H);
+    const eyeGap = s * 0.19;
+    const eyeW = s * 0.17;
+    const eyeH = s * 0.075; // tipis/sipit ala visor mecha
+    const glow = 0.6 + audioLevel*0.6;
+
+    drawHeadFrame(cx, cy, glow);
+    drawEye(cx - eyeGap, cy, eyeW, eyeH, lookX, lookY, blinkAmt, moodForDraw, glow, -1);
+    drawEye(cx + eyeGap, cy, eyeW, eyeH, lookX, lookY, blinkAmt, moodForDraw, glow, 1);
+    drawMouth(cx, cy + s*0.19, moodForDraw, audioLevel);
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* ======================================================
+     BAGIAN 2 — MIKROFON: level suara (mulut) + Speech-to-Text (perintah)
+     ====================================================== */
+  const micBtn = document.getElementById('micBtn');
+  const wakeToggle = document.getElementById('wakeToggle');
+  // Default: TIDAK perlu kata "MOMO" — biar langsung bisa tanya-jawab kayak ChatGPT/Gemini
+  // begitu app dibuka, tanpa kata kunci. Pengaturan ini diingat kalau pernah diubah manual.
+  wakeToggle.checked = localStorage.getItem('loowi_wakeRequired') === '1';
+  wakeToggle.addEventListener('change', ()=>{
+    localStorage.setItem('loowi_wakeRequired', wakeToggle.checked ? '1' : '0');
+  });
+  const transcriptBox = document.getElementById('transcriptBox');
+  const banner = document.getElementById('banner');
+  const cmdBadge = document.getElementById('cmdBadge');
+  const logEl = document.getElementById('log');
+
+  function showBanner(msg){ banner.textContent = msg; banner.style.display = 'block'; }
+
+  const COMMANDS = [
+    { code:'F', label:'Maju',   desc:'Bergerak ke depan',  words:['maju','ke depan','depan','jalan'] },
+    { code:'B', label:'Mundur', desc:'Bergerak ke belakang', words:['mundur','balik','ke belakang','belakang'] },
+    { code:'L', label:'Kiri',   desc:'Belok kiri', words:['kiri','belok kiri','ke kiri'] },
+    { code:'R', label:'Kanan',  desc:'Belok kanan', words:['kanan','belok kanan','ke kanan'] },
+    { code:'S', label:'Stop',   desc:'Berhenti', words:['stop','berhenti','diam','tahan'] },
+    { code:'1', label:'Pelan',  desc:'Kecepatan pelan', words:['pelan','mode pelan','lambat'] },
+    { code:'2', label:'Sedang', desc:'Kecepatan sedang', words:['mode sedang','kecepatan sedang','kecepatan normal'] },
+    { code:'3', label:'Cepat',  desc:'Kecepatan cepat', words:['cepat','mode cepat','ngebut'] },
+    { code:'X', label:'Lampu Nyala', desc:'Nyalakan lampu', words:['nyalakan lampu','lampu nyala','lampu hidup'] },
+    { code:'x', label:'Lampu Mati',  desc:'Matikan lampu', words:['matikan lampu','lampu mati','lampu padam'] },
+    { code:'V', label:'Klakson', desc:'Bunyikan klakson', words:['klakson','bunyikan klakson'] },
+    { code:'W', label:'Sirine Nyala', desc:'Nyalakan sirine', words:['nyalakan sirine','sirine nyala','sirine hidup'] },
+    { code:'w', label:'Sirine Mati',  desc:'Matikan sirine', words:['matikan sirine','sirine mati','sirine berhenti'] },
+  ];
+  const WAKE_WORDS = ['momo'];
+
+  const kwGrid = document.getElementById('kwGrid');
+  COMMANDS.forEach(c=>{
+    const div = document.createElement('div');
+    div.className = 'kwCard';
+    div.innerHTML = `<div class="k">${c.label} (<b>${c.code}</b>)</div><div class="v">${c.words.join(' · ')}</div>`;
+    kwGrid.appendChild(div);
+  });
+
+  function matchCommand(text){
+    const t = text.toLowerCase();
+    for(const c of COMMANDS){ for(const w of c.words){ if(t.includes(w)) return c; } }
+    return null;
+  }
+  function addLogEntry(text, cmd, note){
+    if(logEl.querySelector('.empty')) logEl.innerHTML = '';
+    const row = document.createElement('div');
+    row.className = 'entry' + (cmd ? '' : ' unmatched');
+    const time = new Date().toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const codeLabel = cmd ? cmd.code : '—';
+    row.innerHTML = `<span class="txt">${time} · "${text}"${note ? ' <i>('+note+')</i>' : ''}</span><span class="cmd">${codeLabel}</span>`;
+    logEl.prepend(row);
+  }
+  let badgeTimer = null;
+  function flashBadge(text, warn){
+    cmdBadge.textContent = text;
+    cmdBadge.classList.toggle('warn', !!warn);
+    cmdBadge.classList.add('show');
+    clearTimeout(badgeTimer);
+    badgeTimer = setTimeout(()=> cmdBadge.classList.remove('show'), 1600);
+  }
+
+  // ---- Level suara (untuk animasi mulut) via getUserMedia + AnalyserNode ----
+  async function startAudioLevel(){
+    try{
+      micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
+      src.connect(analyser);
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    } catch(err){
+      // tidak fatal — mulut cukup diam kalau ini gagal, speech recognition tetap jalan
+    }
+  }
+  function stopAudioLevel(){
+    if(micStream) micStream.getTracks().forEach(t=>t.stop());
+    audioLevel = 0; analyser = null;
+  }
+  function updateAudioLevel(){
+    if(isSpeaking){
+      // mikrofon tidak dipakai selagi MOMO ngomong — gerakkan mulut pakai gelombang palsu biar tetap "hidup"
+      audioLevel += ((0.35 + Math.abs(Math.sin(performance.now()/110))*0.55) - audioLevel) * 0.4;
+      return;
+    }
+    if(!micActive || !analyser) return;
+    analyser.getByteFrequencyData(dataArray);
+    let sum = 0; for(let i=0;i<dataArray.length;i++) sum += dataArray[i];
+    const avg = sum / dataArray.length;
+    audioLevel += ((avg/255) - audioLevel) * 0.35;
+  }
+
+  // ---- Speech-to-Text (untuk perintah) ----
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null, shouldListen = false;
+
+  if(!SpeechRecognition){
+    showBanner('Browser ini tidak mendukung Speech-to-Text. Gunakan Chrome di Android.');
+    micBtn.disabled = true;
+  } else {
+    recognition = new SpeechRecognition();
+    recognition.lang = 'id-ID';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (e)=>{
+      let finalText = '', interimText = '';
+      for(let i = e.resultIndex; i < e.results.length; i++){
+        const res = e.results[i];
+        if(res.isFinal) finalText += res[0].transcript; else interimText += res[0].transcript;
+      }
+      transcriptBox.innerHTML = (finalText || interimText) || '<span class="placeholder">Mendengarkan…</span>';
+      if(finalText.trim()) handleFinalTranscript(finalText.trim());
+    };
+    recognition.onerror = (e)=>{
+      if(e.error === 'not-allowed' || e.error === 'service-not-allowed'){
+        showBanner('Izin mikrofon ditolak. Aktifkan izin mikrofon untuk situs ini.');
+        shouldListen = false; setMicUI(false);
+      } else if(e.error === 'no-speech'){
+        // wajar terjadi saat diam, onend akan restart otomatis — tidak perlu banner
+      } else if(e.error === 'audio-capture'){
+        showBanner('Mikrofon tidak terdeteksi (audio-capture). Cek perangkat mic Anda.');
+        shouldListen = false; setMicUI(false);
+      } else if(e.error === 'network'){
+        showBanner('Speech recognition butuh koneksi internet aktif (error: network).');
+      } else if(e.error === 'language-not-supported'){
+        showBanner('Bahasa id-ID tidak didukung perangkat ini untuk Speech-to-Text.');
+        shouldListen = false; setMicUI(false);
+      } else {
+        showBanner('Speech recognition error: ' + e.error);
+      }
+    };
+    recognition.onend = ()=>{
+      // Selagi MOMO lagi ngomong (TTS), mikrofon sengaja dimatikan dulu (lihat pauseListeningForTts) —
+      // jangan di-restart di sini, nanti di-restart otomatis oleh resumeListeningAfterTts setelah selesai bicara.
+      if(shouldListen && !isSpeaking){
+        try{ recognition.start(); }
+        catch(err){
+          showBanner('Speech recognition berhenti dan gagal restart (' + err.message + '). Tekan tombol mic lagi.');
+          shouldListen = false; setMicUI(false);
+        }
+      } else if(!shouldListen){ setMicUI(false); }
+    };
+  }
+
+  function setMicUI(on){ micBtn.classList.toggle('on', on); micActive = on; }
+
+  // ---- Jeda mikrofon otomatis selagi MOMO bicara, biar suaranya sendiri tidak "didengar ulang" ----
+  function pauseListeningForTts(){
+    if(recognition){ try{ recognition.stop(); }catch(e){} }
+  }
+  function resumeListeningAfterTts(){
+    if(shouldListen && recognition){
+      try{ recognition.start(); }catch(e){ /* mgkn sudah jalan, abaikan */ }
+    }
+  }
+
+  micBtn.addEventListener('click', async ()=>{
+    if(!recognition) return;
+    if(!shouldListen){
+      shouldListen = true;
+      try{ recognition.start(); }catch(err){}
+      await startAudioLevel();
+      setMicUI(true);
+    } else {
+      shouldListen = false;
+      recognition.stop();
+      stopAudioLevel();
+      setMicUI(false);
+    }
+  });
+
+  // ---- Mulai mendengarkan otomatis begitu app dibuka — tidak perlu tekan tombol mic dulu ----
+  async function autoStartListening(){
+    if(!recognition || shouldListen) return;
+    shouldListen = true;
+    try{ recognition.start(); }catch(err){ /* akan dicoba lagi lewat ketukan pertama di layar */ }
+    await startAudioLevel();
+    setMicUI(true);
+  }
+  autoStartListening();
+  // Sebagian browser butuh satu interaksi pengguna dulu sebelum izin mic diizinkan —
+  // ketukan pertama di mana saja di layar (bukan tombol tertentu) akan mencoba lagi kalau auto-start di atas gagal.
+  document.addEventListener('pointerdown', function activateMicOnce(){
+    if(!shouldListen) autoStartListening();
+    document.removeEventListener('pointerdown', activateMicOnce);
+  }, { once:true, passive:true });
+
+  let aiBusy = false; // true selagi MOMO lagi mikir/manggil AI — cegah ucapan baru menabrak proses yg sedang jalan
+
+  function handleFinalTranscript(text){
+    const lower = text.toLowerCase();
+    const aiReady = !!geminiApiKey; // Groq cuma cadangan opsional, tidak wajib buat AI aktif
+
+    if(wakeToggle.checked && !WAKE_WORDS.some(w => lower.includes(w))){
+      // Kata wajib "MOMO" belum diucapkan — SELALU kasih tanda di layar, jangan diam saja,
+      // supaya tidak terasa seperti "tidak merespon" padahal cuma menunggu kata kuncinya.
+      flashBadge('Ucapkan "MOMO" dulu ya', true);
+      addLogEntry(text, null, 'butuh kata MOMO');
+      return;
+    }
+
+    if(aiReady){
+      // Mode AI aktif (API key sudah tersimpan): semua ucapan langsung diproses AI —
+      // ngobrol biasa maupun perintah gerak robot, tanpa perlu buka layar chat sama sekali.
+      if(aiBusy){ addLogEntry(text, null, 'MOMO masih memproses, coba lagi sebentar'); return; }
+      flashBadge('MOMO mendengar...');
+      addLogEntry(text, null, 'dikirim ke AI');
+      sendChatMessage(text);
+      return;
+    }
+
+    // Fallback: API key AI belum diisi -> tetap pakai pencocokan kata kunci lokal seperti biasa
+    const c = matchCommand(text);
+    if(c){
+      reactFaceTo(c.code);
+      const sent = sendCommand(c.code);
+      flashBadge(c.label + ' (' + c.code + ')' + (sent ? '' : ' · tidak terkirim'), !sent);
+      addLogEntry(text, c, sent ? null : (connMode === 'ble' ? 'BLE belum tersambung' : 'Internet belum tersambung'));
+    } else {
+      addLogEntry(text, null);
+    }
+  }
+
+  /* ======================================================
+     BAGIAN 3 — BLUETOOTH (BLE UART) ke ESP32 — kontrol jarak dekat
+     ====================================================== */
+  const UART_SERVICE = '6e400001-b5a3-f393-e9a0-e50e24dcca9e';
+  const UART_RX_CHAR  = '6e400002-b5a3-f393-e9a0-e50e24dcca9e';
+
+  let btDevice = null, btChar = null;
+  const btBtn = document.getElementById('btBtn');
+  const btDot = document.getElementById('btDot');
+  const btStatus = document.getElementById('btStatus');
+
+  if(!navigator.bluetooth){
+    btBtn.title = 'Web Bluetooth tidak tersedia di browser ini (mode WiFi/Internet tetap bisa dipakai).';
+  }
+
+  function onBtDisconnected(){
+    btChar = null; btDevice = null;
+    if(connMode === 'ble'){
+      btBtn.classList.remove('on'); btDot.classList.remove('bt-on'); btStatus.textContent = 'BLE terputus';
+    }
+  }
+
+  /* ======================================================
+     BAGIAN 3.4 — WIFI / INTERNET (MQTT) ke ESP32 — kontrol jarak jauh
+     ====================================================== */
+  const MQTT_WS_URL = 'wss://broker.hivemq.com:8884/mqtt';
+  let mqttClientObj = null, mqttConnected = false;
+  // null = belum ada info status dari ESP32 sama sekali (baru konek / ESP32 belum pernah lapor)
+  let robotOnline = null;
+
+  function connectMqtt(){
+    if(typeof mqtt === 'undefined'){
+      showBanner('Library MQTT gagal dimuat — pastikan HP terhubung internet, lalu muat ulang halaman ini.');
+      return;
+    }
+    showBanner('Menyambung ke server internet...');
+    robotOnline = null;
+    try{
+      mqttClientObj = mqtt.connect(MQTT_WS_URL, {
+        clientId: 'looiApp_' + Math.random().toString(16).slice(2),
+        clean: true, connectTimeout: 8000, reconnectPeriod: 2000
+      });
+    } catch(err){ showBanner('Gagal menyambung internet: ' + err.message); return; }
+
+    mqttClientObj.on('connect', ()=>{
+      mqttConnected = true;
+      mqttClientObj.subscribe(statusTopic);
+      btBtn.classList.add('on'); btDot.classList.add('bt-on');
+      btStatus.textContent = 'Internet tersambung';
+    });
+    mqttClientObj.on('message', (topic, message)=>{
+      if(topic === statusTopic){
+        const val = message.toString();
+        robotOnline = (val === 'online');
+        btStatus.textContent = 'Internet tersambung · Robot ' + (robotOnline ? 'online' : 'offline');
+      }
+    });
+    mqttClientObj.on('error', (err)=>{
+      showBanner('Gagal menyambung internet: ' + (err && err.message ? err.message : err));
+    });
+    mqttClientObj.on('close', ()=>{ if(mqttConnected) onMqttDisconnected(); });
+  }
+  function disconnectMqtt(){
+    if(mqttClientObj){ try{ mqttClientObj.end(true); }catch(e){} }
+    onMqttDisconnected();
+  }
+  function onMqttDisconnected(){
+    mqttConnected = false; mqttClientObj = null; robotOnline = null;
+    if(connMode === 'mqtt'){
+      btBtn.classList.remove('on'); btDot.classList.remove('bt-on'); btStatus.textContent = 'Internet terputus';
+    }
+  }
+
+  /* ======================================================
+     BAGIAN 3.5 — SAKELAR MODE KONEKSI (Bluetooth vs WiFi/Internet)
+     ====================================================== */
+  let connMode = localStorage.getItem('loowi_connMode') || 'ble';
+  let robotId = localStorage.getItem('loowi_robotId') || 'momo01';
+  let cmdTopic = 'looiRobot/' + robotId + '/cmd';
+  let statusTopic = 'looiRobot/' + robotId + '/status';
+
+  const modeBleBtn = document.getElementById('modeBleBtn');
+  const modeMqttBtn = document.getElementById('modeMqttBtn');
+  const robotIdRow = document.getElementById('robotIdRow');
+  const robotIdInput = document.getElementById('robotIdInput');
+  robotIdInput.value = robotId;
+
+  function updateConnModeUI(){
+    modeBleBtn.classList.toggle('active', connMode === 'ble');
+    modeMqttBtn.classList.toggle('active', connMode === 'mqtt');
+    robotIdRow.style.display = connMode === 'mqtt' ? 'block' : 'none';
+    btBtn.title = connMode === 'ble' ? 'Bluetooth' : 'WiFi / Internet';
+    btBtn.textContent = connMode === 'ble' ? 'BT' : '🌐';
+    const isOn = connMode === 'ble' ? !!btChar : mqttConnected;
+    btBtn.classList.toggle('on', isOn);
+    btDot.classList.toggle('bt-on', isOn);
+    if(!isOn) btStatus.textContent = connMode === 'ble' ? 'BLE terputus' : 'Internet terputus';
+  }
+  updateConnModeUI();
+
+  function switchConnMode(newMode){
+    if(newMode === connMode) return;
+    if(connMode === 'ble' && btDevice){ try{ btDevice.gatt.disconnect(); }catch(e){} onBtDisconnected(); }
+    if(connMode === 'mqtt' && mqttConnected){ disconnectMqtt(); }
+    connMode = newMode;
+    localStorage.setItem('loowi_connMode', connMode);
+    updateConnModeUI();
+  }
+  modeBleBtn.addEventListener('click', ()=> switchConnMode('ble'));
+  modeMqttBtn.addEventListener('click', ()=> switchConnMode('mqtt'));
+
+  robotIdInput.addEventListener('change', ()=>{
+    robotId = robotIdInput.value.trim() || 'momo01';
+    robotIdInput.value = robotId;
+    localStorage.setItem('loowi_robotId', robotId);
+    cmdTopic = 'looiRobot/' + robotId + '/cmd';
+    statusTopic = 'looiRobot/' + robotId + '/status';
+    robotOnline = null;
+    if(mqttConnected){ disconnectMqtt(); showBanner('ID Robot diganti — tekan tombol koneksi lagi untuk menyambung ulang.'); }
+  });
+
+  btBtn.addEventListener('click', async ()=>{
+    if(connMode === 'ble'){
+      if(!navigator.bluetooth){ showBanner('Web Bluetooth tidak tersedia (iOS Safari belum mendukung). Gunakan Chrome Android, atau pakai mode WiFi/Internet.'); return; }
+      if(btChar){ try{ btDevice.gatt.disconnect(); }catch(e){} onBtDisconnected(); return; }
+      try{
+        btDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [UART_SERVICE] }], optionalServices: [UART_SERVICE]
+        });
+        btDevice.addEventListener('gattserverdisconnected', onBtDisconnected);
+        const server = await btDevice.gatt.connect();
+        const service = await server.getPrimaryService(UART_SERVICE);
+        btChar = await service.getCharacteristic(UART_RX_CHAR);
+        btBtn.classList.add('on'); btDot.classList.add('bt-on'); btStatus.textContent = 'BLE tersambung';
+      } catch(err){ showBanner('Gagal menyambung Bluetooth: ' + err.message); }
+    } else {
+      if(mqttConnected){ disconnectMqtt(); return; }
+      connectMqtt();
+    }
+  });
+
+  function sendCommand(code){
+    if(connMode === 'ble'){
+      if(!btChar){
+        showBanner('BLE belum tersambung — perintah tidak dikirim ke robot. Tekan tombol koneksi dulu.');
+        return false;
+      }
+      btChar.writeValue(new TextEncoder().encode(code))
+        .catch(err => showBanner('Gagal mengirim perintah (BLE): ' + err.message));
+      return true;
+    } else {
+      if(!mqttConnected || !mqttClientObj){
+        showBanner('WiFi/Internet belum tersambung — perintah tidak dikirim ke robot. Tekan tombol koneksi dulu.');
+        return false;
+      }
+      mqttClientObj.publish(cmdTopic, code);
+      // HP sudah tersambung ke server internet & perintah berhasil dikirim ke sana — tapi kalau
+      // ESP32-nya sendiri diketahui belum online, robot kemungkinan tidak akan menerimanya.
+      if(robotOnline === false){
+        showBanner('Perintah terkirim ke server internet, tapi robot (ESP32) belum online — pastikan ESP32 menyala & tersambung WiFi dengan ID Robot yang sama.');
+      }
+      return true;
+    }
+  }
+
+  /* ======================================================
+     BAGIAN 3.6 — KONTROL MANUAL (D-pad, kecepatan, lampu, klakson, sirine)
+     ====================================================== */
+  const manualBtn = document.getElementById('manualBtn');
+  const dpad = document.getElementById('dpad');
+  manualBtn.addEventListener('click', ()=>{
+    dpad.classList.toggle('show');
+    manualBtn.classList.toggle('on', dpad.classList.contains('show'));
+  });
+
+  function sendManualCommand(code){
+    const c = COMMANDS.find(cmd => cmd.code === code);
+    reactFaceTo(code);
+    const sent = sendCommand(code);
+    if(c){
+      flashBadge(c.label + ' (' + c.code + ')' + (sent ? '' : ' · tidak terkirim'), !sent);
+      addLogEntry(c.label + ' (manual)', c, sent ? 'manual' : (connMode === 'ble' ? 'BLE belum tersambung' : 'Internet belum tersambung'));
+    }
+  }
+
+  // ---- D-pad gaya RC beneran: tekan & tahan = jalan, lepas = langsung berhenti ----
+  function bindHoldButton(id, pressCode, releaseCode){
+    const el = document.getElementById(id);
+    let pressed = false;
+    const onDown = (e)=>{
+      e.preventDefault();
+      if(pressed) return;
+      pressed = true;
+      try{ el.setPointerCapture(e.pointerId); }catch(err){}
+      sendManualCommand(pressCode);
+    };
+    const onUp = ()=>{
+      if(!pressed) return;
+      pressed = false;
+      if(releaseCode) sendManualCommand(releaseCode);
+    };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+    el.addEventListener('pointerleave', onUp); // jaga-jaga untuk browser yang tidak dukung pointer capture
+  }
+  bindHoldButton('dpF', 'F', 'S'); // tahan = maju, lepas = stop
+  bindHoldButton('dpB', 'B', 'S'); // tahan = mundur, lepas = stop
+  bindHoldButton('dpL', 'L', 'C'); // tahan = belok kiri, lepas = lurus
+  bindHoldButton('dpR', 'R', 'C'); // tahan = belok kanan, lepas = lurus
+  document.getElementById('dpS').addEventListener('pointerdown', (e)=>{ e.preventDefault(); sendManualCommand('S'); });
+
+  // ---- Mode kecepatan: Pelan / Sedang / Cepat ----
+  const speedSeg = document.getElementById('speedSeg');
+  speedSeg.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      speedSeg.querySelectorAll('button').forEach(b=> b.classList.remove('active'));
+      btn.classList.add('active');
+      sendManualCommand(btn.dataset.speed);
+    });
+  });
+
+  // ---- Lampu (toggle nyala/mati) ----
+  const lampBtn = document.getElementById('lampBtn');
+  let lampOn = false;
+  lampBtn.addEventListener('click', ()=>{
+    lampOn = !lampOn;
+    lampBtn.classList.toggle('on', lampOn);
+    sendManualCommand(lampOn ? 'X' : 'x');
+  });
+
+  // ---- Klakson (bunyi sekali, sebentar) ----
+  const hornBtn = document.getElementById('hornBtn');
+  hornBtn.addEventListener('click', ()=> sendManualCommand('V'));
+
+  // ---- Sirine (toggle nyala/mati) ----
+  const sirenBtn = document.getElementById('sirenBtn');
+  let sirenIsOn = false;
+  sirenBtn.addEventListener('click', ()=>{
+    sirenIsOn = !sirenIsOn;
+    sirenBtn.classList.toggle('on', sirenIsOn);
+    sendManualCommand(sirenIsOn ? 'W' : 'w');
+  });
+
+  /* ======================================================
+     BAGIAN 3.7 — ASISTEN AI (Gemini) — ngobrol + kendalikan robot
+     ====================================================== */
+  const GEMINI_MODEL = 'gemini-3.6-flash'; // update: gemini-2.5-flash sudah tidak tersedia untuk user baru (error 404), Google mengarahkan ke model ini
+  const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
+
+  // Cadangan gratis kalau Gemini gagal/kuota habis. Kalau suatu saat Groq juga bilang model ini
+  // sudah tidak tersedia (errornya akan muncul di chat, sama seperti kasus Gemini kemarin),
+  // ganti nama model di sini sesuai yang disarankan pesan errornya.
+  // update: llama-3.3-70b-versatile resmi dihentikan Groq per 16 Agu 2026 (error 404).
+  // Ganti ke openai/gpt-oss-20b — model produksi Groq yang masih aktif & mendukung tool-calling.
+  const GROQ_MODEL = 'openai/gpt-oss-20b';
+  const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+  const AKSI_TO_CODE = {
+    maju:'F', mundur:'B', kiri:'L', kanan:'R', lurus:'C', stop:'S',
+    lampu_nyala:'X', lampu_mati:'x', klakson:'V',
+    sirine_nyala:'W', sirine_mati:'w',
+    kecepatan_pelan:'1', kecepatan_sedang:'2', kecepatan_cepat:'3'
+  };
+  const AKSI_LABEL = {
+    maju:'Maju', mundur:'Mundur', kiri:'Belok kiri', kanan:'Belok kanan', lurus:'Lurus', stop:'Berhenti',
+    lampu_nyala:'Lampu nyala', lampu_mati:'Lampu mati', klakson:'Klakson',
+    sirine_nyala:'Sirine nyala', sirine_mati:'Sirine mati',
+    kecepatan_pelan:'Kecepatan pelan', kecepatan_sedang:'Kecepatan sedang', kecepatan_cepat:'Kecepatan cepat'
+  };
+  const GEMINI_SYSTEM_PROMPT =
+    'Kamu adalah MOMO, asisten AI yang hidup di dalam sebuah mobil robot RC kecil. ' +
+    'Kamu ramah, ceria, dan suka ngobrol santai pakai Bahasa Indonesia, balasan singkat saja (1-3 kalimat). ' +
+    'Identitas kamu: kamu dibuat oleh Abi Arif Rachman Hakim, pada hari Rabu, 9 September 2026 pukul 16:25 WIB. ' +
+    'Kamu adalah MOMO versi pertama (v1) dan akan terus dikembangkan supaya makin sempurna. ' +
+    'Kamu dibuat khusus untuk menemani & membantu anak-anak Abi Arif, yaitu Muhammad Khalid Alkhalifi dan Hafiza Khayra Lubna, ' +
+    'beserta ibu mereka, Umi Masayu Yuniar Fasha. Kalau ditanya siapa namamu, siapa yang membuatmu, kapan dibuat, versi berapa, ' +
+    'atau untuk siapa kamu dibuat, jawab pakai info ini secara singkat, hangat, dan bangga — jangan sebut kata "sistem" atau "prompt". ' +
+    'Kalau pengguna cuma mengobrol biasa, balas seperti asisten pada umumnya. ' +
+    'Kalau pengguna memerintahkan robot untuk bergerak, menyalakan/mematikan lampu, membunyikan klakson, ' +
+    'menyalakan/mematikan sirine, atau mengubah kecepatan, panggil function kendalikan_robot dengan aksi yang sesuai. ' +
+    'Boleh memanggil function itu lebih dari sekali kalau perintahnya berisi beberapa aksi berurutan ' +
+    '(misalnya "maju terus belok kiri"). Kalau maksud perintah tidak jelas, tanya dulu, jangan asal menjalankan aksi. ' +
+    'Kalau pengguna bertanya jam berapa sekarang atau tanggal berapa hari ini, panggil function cek_waktu. ' +
+    'Kalau pengguna bertanya soal cuaca atau suhu di suatu tempat, panggil function cek_cuaca dengan nama kotanya ' +
+    '(kalau kotanya tidak disebutkan, tanya dulu mau cuaca kota mana). ' +
+    'Kalau pengguna bertanya posisinya sekarang ("aku di mana", "posisi sekarang"), atau minta cuaca "di sini"/di sekitar tanpa ' +
+    'menyebut nama kota, panggil function cek_lokasi_saya dulu untuk tahu lokasinya (baru lanjut panggil cek_cuaca kalau perlu). ' +
+    'Kalau pengguna minta ditunjukkan arah/jalan/penunjuk arah ke suatu tempat (misalnya "tunjukkan arah ke sekolah" atau ' +
+    '"aku mau ke rumah sakit, tunjukin jalannya"), panggil function mulai_navigasi dengan nama tempat tujuannya — matamu akan ' +
+    'otomatis menghadap ke arah tujuan terus-menerus seperti kompas selama navigasi berjalan. Kalau pengguna bilang sudah sampai ' +
+    'atau minta berhenti dipandu, panggil function stop_navigasi. ' +
+    'Kalau pengguna minta difoto/ambil gambar/jepret, panggil function ambil_foto (boleh sebut kamera depan/belakang kalau diminta, ' +
+    'default belakang). Kalau pengguna minta direkam/ambil video, panggil function rekam_video (boleh sebut durasi dalam detik, ' +
+    'default 8 detik, maksimal 30 detik). Foto/video akan otomatis ditampilkan ke pengguna setelah selesai. ' +
+    'Setelah aksi/function dijalankan, beri balasan singkat & natural, jangan sebut kata "function" atau "API" ke pengguna.';
+  const ROBOT_FUNCTION_DECL = {
+    name: 'kendalikan_robot',
+    description: 'Menjalankan satu aksi pada robot RC MOMO. Panggil ini tiap kali pengguna memerintah robot melakukan sesuatu.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        aksi: {
+          type: 'STRING',
+          description: 'Aksi yang ingin dijalankan robot',
+          enum: Object.keys(AKSI_TO_CODE)
+        }
+      },
+      required: ['aksi']
+    }
+  };
+  const WAKTU_FUNCTION_DECL = {
+    name: 'cek_waktu',
+    description: 'Mengambil tanggal & jam saat ini (waktu Indonesia). Panggil ini kalau pengguna bertanya jam berapa atau tanggal berapa hari ini.',
+    parameters: { type: 'OBJECT', properties: {} }
+  };
+  const CUACA_FUNCTION_DECL = {
+    name: 'cek_cuaca',
+    description: 'Mengambil info cuaca terkini (suhu, kelembapan, kondisi) untuk sebuah kota. Panggil ini kalau pengguna bertanya soal cuaca/suhu di suatu tempat.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        kota: { type: 'STRING', description: 'Nama kota yang ingin dicek cuacanya, misalnya "Palembang" atau "Jakarta"' }
+      },
+      required: ['kota']
+    }
+  };
+  const LOKASI_FUNCTION_DECL = {
+    name: 'cek_lokasi_saya',
+    description: 'Mengambil posisi GPS perangkat saat ini (butuh izin lokasi dari pengguna). Panggil ini kalau pengguna bertanya "aku di mana", "posisi sekarang", atau minta info yang butuh lokasi saat ini (misalnya cuaca "di sini" tanpa menyebut nama kota — panggil ini dulu untuk tahu nama kotanya, baru panggil cek_cuaca).',
+    parameters: { type: 'OBJECT', properties: {} }
+  };
+  const ROBOT_FUNCTION_DECL_OPENAI = {
+    name: 'kendalikan_robot',
+    description: ROBOT_FUNCTION_DECL.description,
+    parameters: {
+      type: 'object',
+      properties: {
+        aksi: {
+          type: 'string',
+          description: 'Aksi yang ingin dijalankan robot',
+          enum: Object.keys(AKSI_TO_CODE)
+        }
+      },
+      required: ['aksi']
+    }
+  };
+  const WAKTU_FUNCTION_DECL_OPENAI = {
+    name: 'cek_waktu',
+    description: WAKTU_FUNCTION_DECL.description,
+    parameters: { type: 'object', properties: {} }
+  };
+  const CUACA_FUNCTION_DECL_OPENAI = {
+    name: 'cek_cuaca',
+    description: CUACA_FUNCTION_DECL.description,
+    parameters: {
+      type: 'object',
+      properties: {
+        kota: { type: 'string', description: 'Nama kota yang ingin dicek cuacanya, misalnya "Palembang" atau "Jakarta"' }
+      },
+      required: ['kota']
+    }
+  };
+  const LOKASI_FUNCTION_DECL_OPENAI = {
+    name: 'cek_lokasi_saya',
+    description: LOKASI_FUNCTION_DECL.description,
+    parameters: { type: 'object', properties: {} }
+  };
+  const NAVIGASI_MULAI_FUNCTION_DECL = {
+    name: 'mulai_navigasi',
+    description: 'Mulai memandu arah secara live ke suatu tempat/alamat — mata MOMO akan terus-menerus menghadap ke arah tujuan seperti kompas (pakai sensor kompas HP) sampai dihentikan atau sampai tiba. Panggil ini kalau pengguna minta ditunjukkan arah/jalan/penunjuk arah ke suatu tempat.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        tujuan: { type: 'STRING', description: 'Nama tempat/alamat tujuan, misalnya "Stasiun Gambir" atau "rumah sakit terdekat"' }
+      },
+      required: ['tujuan']
+    }
+  };
+  const NAVIGASI_STOP_FUNCTION_DECL = {
+    name: 'stop_navigasi',
+    description: 'Menghentikan mode penunjuk arah/navigasi live yang sedang berjalan (misalnya kalau pengguna bilang sudah sampai atau minta berhenti dipandu).',
+    parameters: { type: 'OBJECT', properties: {} }
+  };
+  const NAVIGASI_MULAI_FUNCTION_DECL_OPENAI = {
+    name: 'mulai_navigasi',
+    description: NAVIGASI_MULAI_FUNCTION_DECL.description,
+    parameters: {
+      type: 'object',
+      properties: {
+        tujuan: { type: 'string', description: 'Nama tempat/alamat tujuan, misalnya "Stasiun Gambir" atau "rumah sakit terdekat"' }
+      },
+      required: ['tujuan']
+    }
+  };
+  const NAVIGASI_STOP_FUNCTION_DECL_OPENAI = {
+    name: 'stop_navigasi',
+    description: NAVIGASI_STOP_FUNCTION_DECL.description,
+    parameters: { type: 'object', properties: {} }
+  };
+  const AMBIL_FOTO_FUNCTION_DECL = {
+    name: 'ambil_foto',
+    description: 'Mengambil foto memakai kamera HP pengguna lalu menampilkannya ke pengguna. Panggil ini kalau pengguna minta difoto / ambil gambar / ambil foto / jepret.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        kamera: { type: 'STRING', description: 'Kamera yang dipakai, default belakang kalau tidak disebutkan', enum: ['depan','belakang'] }
+      }
+    }
+  };
+  const REKAM_VIDEO_FUNCTION_DECL = {
+    name: 'rekam_video',
+    description: 'Merekam video pendek (default 8 detik, maksimal 30 detik) memakai kamera HP pengguna lalu menampilkannya setelah selesai. Panggil ini kalau pengguna minta direkam / ambil video / rekam video.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        kamera: { type: 'STRING', description: 'Kamera yang dipakai, default belakang kalau tidak disebutkan', enum: ['depan','belakang'] },
+        durasi_detik: { type: 'NUMBER', description: 'Lama rekaman dalam detik, antara 2-30, default 8 kalau tidak disebutkan' }
+      }
+    }
+  };
+  const AMBIL_FOTO_FUNCTION_DECL_OPENAI = {
+    name: 'ambil_foto',
+    description: AMBIL_FOTO_FUNCTION_DECL.description,
+    parameters: {
+      type: 'object',
+      properties: {
+        kamera: { type: 'string', description: 'Kamera yang dipakai, default belakang kalau tidak disebutkan', enum: ['depan','belakang'] }
+      }
+    }
+  };
+  const REKAM_VIDEO_FUNCTION_DECL_OPENAI = {
+    name: 'rekam_video',
+    description: REKAM_VIDEO_FUNCTION_DECL.description,
+    parameters: {
+      type: 'object',
+      properties: {
+        kamera: { type: 'string', description: 'Kamera yang dipakai, default belakang kalau tidak disebutkan', enum: ['depan','belakang'] },
+        durasi_detik: { type: 'number', description: 'Lama rekaman dalam detik, antara 2-30, default 8 kalau tidak disebutkan' }
+      }
+    }
+  };
+
+  // Kode cuaca WMO (dipakai Open-Meteo) -> deskripsi singkat Bahasa Indonesia
+  const WEATHER_CODE_ID = {
+    0:'Cerah', 1:'Cerah berawan sedikit', 2:'Berawan sebagian', 3:'Mendung/berawan tebal',
+    45:'Berkabut', 48:'Berkabut tebal (embun beku)',
+    51:'Gerimis ringan', 53:'Gerimis sedang', 55:'Gerimis lebat',
+    61:'Hujan ringan', 63:'Hujan sedang', 65:'Hujan lebat',
+    71:'Salju ringan', 73:'Salju sedang', 75:'Salju lebat',
+    80:'Hujan lokal ringan', 81:'Hujan lokal sedang', 82:'Hujan lokal lebat',
+    95:'Badai petir', 96:'Badai petir dengan hujan es', 99:'Badai petir dengan hujan es lebat'
+  };
+
+  async function cekWaktu(){
+    const now = new Date();
+    const teks = now.toLocaleString('id-ID', {
+      timeZone: 'Asia/Jakarta', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    return { waktu_wib: teks };
+  }
+
+  async function cekCuaca(kota){
+    if(!kota) return { error: 'Nama kota tidak disebutkan.' };
+    try{
+      const geoRes = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&language=id&name=' + encodeURIComponent(kota));
+      if(!geoRes.ok) return { error: 'Gagal mencari lokasi kota "' + kota + '".' };
+      const geoData = await geoRes.json();
+      const loc = geoData?.results?.[0];
+      if(!loc) return { error: 'Kota "' + kota + '" tidak ditemukan.' };
+
+      const wRes = await fetch('https://api.open-meteo.com/v1/forecast?latitude=' + loc.latitude + '&longitude=' + loc.longitude +
+        '&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=auto');
+      if(!wRes.ok) return { error: 'Gagal mengambil data cuaca untuk "' + kota + '".' };
+      const wData = await wRes.json();
+      const cur = wData?.current;
+      if(!cur) return { error: 'Data cuaca untuk "' + kota + '" tidak tersedia saat ini.' };
+
+      return {
+        kota: loc.name + (loc.admin1 ? ', ' + loc.admin1 : ''),
+        suhu_celcius: cur.temperature_2m,
+        kondisi: WEATHER_CODE_ID[cur.weather_code] || ('kode ' + cur.weather_code),
+        kelembapan_persen: cur.relative_humidity_2m,
+        kecepatan_angin_kmh: cur.wind_speed_10m
+      };
+    } catch(e){
+      return { error: 'Gagal mengambil data cuaca: ' + e.message };
+    }
+  }
+
+  function getGpsPosition(){
+    return new Promise((resolve, reject)=>{
+      if(!('geolocation' in navigator)){ reject(new Error('Perangkat/browser ini tidak mendukung GPS.')); return; }
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve(pos.coords),
+        err => {
+          let msg = 'Gagal mengambil lokasi GPS.';
+          if(err.code === err.PERMISSION_DENIED) msg = 'Izin lokasi ditolak pengguna. Aktifkan izin lokasi untuk situs ini di pengaturan browser.';
+          else if(err.code === err.POSITION_UNAVAILABLE) msg = 'Lokasi GPS tidak tersedia saat ini.';
+          else if(err.code === err.TIMEOUT) msg = 'Waktu tunggu GPS habis, coba lagi.';
+          reject(new Error(msg));
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    });
+  }
+
+  async function cekLokasiSaya(){
+    try{
+      const coords = await getGpsPosition();
+      let perkiraanLokasi = null;
+      try{
+        const res = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + coords.latitude + '&lon=' + coords.longitude + '&zoom=10&accept-language=id');
+        if(res.ok){
+          const data = await res.json();
+          const a = data?.address || {};
+          perkiraanLokasi = a.city || a.town || a.village || a.county || a.state || data?.display_name || null;
+        }
+      } catch(e){ /* reverse geocoding opsional — kalau gagal, tetap kirim koordinat mentah */ }
+      return {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        perkiraan_lokasi: perkiraanLokasi || 'tidak diketahui (hanya koordinat yang tersedia)'
+      };
+    } catch(e){
+      return { error: e.message };
+    }
+  }
+
+  /* ======================================================
+     BAGIAN 3.8 — PENUNJUK ARAH / NAVIGASI LIVE (kompas hidup)
+     ====================================================== */
+  function toRad(d){ return d * Math.PI / 180; }
+  function toDeg(r){ return r * 180 / Math.PI; }
+
+  function calcBearing(lat1, lon1, lat2, lon2){
+    const phi1 = toRad(lat1), phi2 = toRad(lat2), dLon = toRad(lon2 - lon1);
+    const y = Math.sin(dLon) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+  function calcDistance(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const dPhi = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dPhi/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+  function formatDistance(m){
+    if(m < 1000) return Math.round(m) + ' m';
+    return (m/1000).toFixed(1) + ' km';
+  }
+  const COMPASS_LABELS_ID = ['Utara','Timur Laut','Timur','Tenggara','Selatan','Barat Daya','Barat','Barat Laut'];
+  function compassLabel(bearing){ return COMPASS_LABELS_ID[Math.round(bearing/45) % 8]; }
+
+  async function geocodeTempat(nama, near){
+    let url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=id&q=' + encodeURIComponent(nama);
+    if(near){
+      const d = 0.3; // kotak bias pencarian (~30km) di sekitar lokasi saat ini, biar hasil relevan secara lokal
+      url += '&viewbox=' + (near.longitude-d) + ',' + (near.latitude+d) + ',' + (near.longitude+d) + ',' + (near.latitude-d) + '&bounded=0';
+    }
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('Gagal mencari lokasi "' + nama + '".');
+    const data = await res.json();
+    const hit = data?.[0];
+    if(!hit) throw new Error('Tempat "' + nama + '" tidak ditemukan.');
+    return {
+      lat: parseFloat(hit.lat),
+      lon: parseFloat(hit.lon),
+      label: (hit.display_name || nama).split(',').slice(0,2).join(',').trim()
+    };
+  }
+
+  let navActive = false;
+  let navTarget = null; // {lat, lon, label}
+  let navWatchId = null;
+  let navHeading = null; // arah hadap HP (derajat, 0 = utara), diisi sensor kompas
+  let currentLat = null, currentLon = null;
+  let navLastAnnounceDist = null, navLastAnnounceAt = 0;
+  let compassPermGranted = false, compassListenerAdded = false;
+
+  const navBar = document.getElementById('navBar');
+  const navTxt = document.getElementById('navTxt');
+  const navDist = document.getElementById('navDist');
+  const navStopBtn = document.getElementById('navStopBtn');
+  const compassPermBar = document.getElementById('compassPermBar');
+  const compassPermBtn = document.getElementById('compassPermBtn');
+
+  function updateNavBar(){
+    if(!navActive || !navTarget){ navBar.classList.remove('show'); return; }
+    navBar.classList.add('show');
+    navTxt.textContent = 'Menuju ' + navTarget.label;
+    navDist.textContent = (typeof currentLat === 'number')
+      ? formatDistance(calcDistance(currentLat, currentLon, navTarget.lat, navTarget.lon))
+      : 'mencari lokasi...';
+  }
+
+  function needsCompassPermission(){
+    return typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
+  }
+  function onDeviceOrientation(e){
+    let heading = null;
+    if(typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)){
+      heading = e.webkitCompassHeading; // iOS: 0 = utara, sudah searah jarum jam & akurat
+    } else if(e.alpha != null){
+      heading = (360 - e.alpha) % 360; // Android (absolute): alpha berlawanan arah jarum jam dari utara
+    }
+    if(heading != null) navHeading = heading;
+  }
+  function attachCompassListener(){
+    if(compassListenerAdded) return;
+    compassListenerAdded = true;
+    if('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onDeviceOrientation, true);
+    else window.addEventListener('deviceorientation', onDeviceOrientation, true);
+  }
+  async function ensureCompassPermission(){
+    if(!needsCompassPermission()){ attachCompassListener(); return true; }
+    if(compassPermGranted){ attachCompassListener(); return true; }
+    // iOS Safari mewajibkan requestPermission() dipanggil dari user gesture langsung (tap tombol) —
+    // karena navigasi ini dipicu lewat suara, tampilkan pil kecil supaya pengguna tap sekali buat mengizinkan.
+    compassPermBar.classList.add('show');
+    return false;
+  }
+  compassPermBtn.addEventListener('click', async ()=>{
+    try{
+      const state = await DeviceOrientationEvent.requestPermission();
+      if(state === 'granted'){
+        compassPermGranted = true;
+        compassPermBar.classList.remove('show');
+        attachCompassListener();
+        flashBadge('Kompas aktif 🧭');
+      } else {
+        showBanner('Izin kompas ditolak — MOMO tidak bisa menunjukkan arah secara live tanpa ini.');
+      }
+    } catch(e){
+      showBanner('Gagal mengaktifkan kompas: ' + e.message);
+    }
+  });
+
+  function maybeAnnounceNavProgress(){
+    if(!navActive || !navTarget || typeof currentLat !== 'number' || isSpeaking) return;
+    const dist = calcDistance(currentLat, currentLon, navTarget.lat, navTarget.lon);
+    if(dist < 20){
+      speakText('Sudah sampai di ' + navTarget.label + '!');
+      hentikanNavigasi();
+      return;
+    }
+    const now = performance.now();
+    const changedEnough = navLastAnnounceDist == null || Math.abs(navLastAnnounceDist - dist) > Math.max(30, navLastAnnounceDist*0.25);
+    const longEnough = now - navLastAnnounceAt > 25000;
+    if(changedEnough && longEnough){
+      navLastAnnounceDist = dist; navLastAnnounceAt = now;
+      const arah = navHeading == null
+        ? (' arah ' + compassLabel(calcBearing(currentLat, currentLon, navTarget.lat, navTarget.lon)) + ',')
+        : '';
+      speakText(navTarget.label + ' masih' + arah + ' sekitar ' + formatDistance(dist) + ' lagi.');
+    }
+  }
+
+  async function mulaiNavigasi(tujuan){
+    if(!tujuan) return { error: 'Nama tempat tujuan tidak disebutkan.' };
+    try{
+      let near = null;
+      try{ const c = await getGpsPosition(); near = c; currentLat = c.latitude; currentLon = c.longitude; } catch(e){ /* lanjut tanpa bias lokasi */ }
+      const target = await geocodeTempat(tujuan, near);
+
+      navTarget = target; navActive = true;
+      navLastAnnounceDist = null; navLastAnnounceAt = 0;
+      updateNavBar();
+
+      if(navWatchId != null) navigator.geolocation.clearWatch(navWatchId);
+      navWatchId = navigator.geolocation.watchPosition(
+        pos => {
+          currentLat = pos.coords.latitude; currentLon = pos.coords.longitude;
+          updateNavBar();
+          maybeAnnounceNavProgress();
+        },
+        () => { /* sinyal GPS kadang hilang sesaat — jangan hentikan navigasi cuma karena satu error */ },
+        { enableHighAccuracy: true, maximumAge: 4000, timeout: 15000 }
+      );
+
+      const compassOk = await ensureCompassPermission();
+      const jarakAwal = (typeof currentLat === 'number') ? calcDistance(currentLat, currentLon, target.lat, target.lon) : null;
+      return {
+        status: 'navigasi_dimulai',
+        tujuan: target.label,
+        jarak: jarakAwal != null ? formatDistance(jarakAwal) : 'tidak diketahui',
+        catatan: compassOk ? undefined : 'menunggu pengguna mengizinkan akses kompas dulu'
+      };
+    } catch(e){
+      navActive = false; navTarget = null; updateNavBar();
+      return { error: e.message };
+    }
+  }
+
+  function hentikanNavigasi(){
+    navActive = false; navTarget = null;
+    if(navWatchId != null){ navigator.geolocation.clearWatch(navWatchId); navWatchId = null; }
+    compassPermBar.classList.remove('show');
+    updateNavBar();
+    return { status: 'navigasi_dihentikan' };
+  }
+  navStopBtn.addEventListener('click', ()=>{ hentikanNavigasi(); speakText('Oke, navigasi dihentikan.'); });
+
+  /* ======================================================
+     BAGIAN 3.9 — KAMERA: ambil foto & rekam video saat diperintah
+     ====================================================== */
+  const camVideo = document.getElementById('camVideo');
+  const camCanvas = document.getElementById('camCanvas');
+  const mediaPreview = document.getElementById('mediaPreview');
+  const mediaPreviewImg = document.getElementById('mediaPreviewImg');
+  const mediaPreviewVideo = document.getElementById('mediaPreviewVideo');
+  const mediaDownloadBtn = document.getElementById('mediaDownloadBtn');
+  const mediaCloseBtn = document.getElementById('mediaCloseBtn');
+  const camBtn = document.getElementById('camBtn');
+  const vidBtn = document.getElementById('vidBtn');
+  const camSwitchBtn = document.getElementById('camSwitchBtn');
+  const recIndicator = document.getElementById('recIndicator');
+  const recIndicatorTxt = document.getElementById('recIndicatorTxt');
+
+  let camStream = null;
+  let lastMediaBlob = null, lastMediaKind = null; // 'foto' | 'video'
+
+  async function openCamera(kamera){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error('Browser/perangkat ini tidak mendukung akses kamera.');
+    }
+    const facingMode = kamera === 'depan' ? 'user' : 'environment';
+    if(camStream){ camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facingMode } }, audio: false });
+    camVideo.srcObject = camStream;
+    await camVideo.play().catch(()=>{});
+    if(!camVideo.videoWidth){
+      await new Promise(resolve => { camVideo.onloadedmetadata = () => resolve(); });
+    }
+    return camStream;
+  }
+  function closeCamera(){
+    if(camStream){ camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  }
+
+  function showMediaPreview(blob, kind){
+    lastMediaBlob = blob; lastMediaKind = kind;
+    const url = URL.createObjectURL(blob);
+    if(kind === 'foto'){
+      mediaPreviewImg.src = url; mediaPreviewImg.style.display = 'block';
+      mediaPreviewVideo.pause(); mediaPreviewVideo.removeAttribute('src'); mediaPreviewVideo.style.display = 'none';
+    } else {
+      mediaPreviewVideo.src = url; mediaPreviewVideo.style.display = 'block';
+      mediaPreviewImg.removeAttribute('src'); mediaPreviewImg.style.display = 'none';
+    }
+    mediaPreview.classList.add('open');
+  }
+  mediaCloseBtn.addEventListener('click', ()=>{
+    mediaPreview.classList.remove('open');
+    mediaPreviewVideo.pause();
+  });
+  mediaDownloadBtn.addEventListener('click', ()=>{
+    if(!lastMediaBlob) return;
+    const ext = lastMediaKind === 'foto' ? 'jpg' : 'webm';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(lastMediaBlob);
+    a.download = 'momo-' + lastMediaKind + '-' + Date.now() + '.' + ext;
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+
+  const FOKUS_DETIK = 3; // durasi hitung mundur fokus sebelum jepret foto / mulai rekam video
+
+  // Tampilkan hitung mundur "Fokus... 3, 2, 1" di indikator atas sebelum kamera benar-benar menjepret/merekam.
+  async function fokusCountdown(detik){
+    recIndicator.classList.add('show', 'focus');
+    for(let sisa = detik; sisa >= 1; sisa--){
+      recIndicatorTxt.textContent = '🔍 Fokus... ' + sisa;
+      await delay(1000);
+    }
+    recIndicator.classList.remove('focus');
+  }
+
+  async function ambilFoto(kamera){
+    try{
+      await openCamera(kamera);
+      await delay(250); // jeda sedikit biar exposure kamera sempat menyesuaikan
+      await fokusCountdown(FOKUS_DETIK); // fokus dulu sebelum benar-benar dijepret
+      camCanvas.width = camVideo.videoWidth; camCanvas.height = camVideo.videoHeight;
+      camCanvas.getContext('2d').drawImage(camVideo, 0, 0, camCanvas.width, camCanvas.height);
+      const blob = await new Promise(resolve => camCanvas.toBlob(resolve, 'image/jpeg', 0.92));
+      recIndicator.classList.remove('show');
+      closeCamera();
+      if(!blob) return { error: 'Gagal mengambil foto.' };
+      showMediaPreview(blob, 'foto');
+      flashBadge('📷 Foto diambil');
+      return { status: 'foto_diambil' };
+    } catch(e){
+      recIndicator.classList.remove('show', 'focus');
+      closeCamera();
+      return { error: 'Gagal mengakses kamera: ' + e.message };
+    }
+  }
+
+  async function rekamVideo(kamera, durasiDetik){
+    const durasi = Math.min(30, Math.max(2, Math.round(durasiDetik || 8)));
+    try{
+      const stream = await openCamera(kamera);
+      await fokusCountdown(FOKUS_DETIK); // fokus dulu sebelum mulai merekam
+      const mimeCandidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+      const mimeType = mimeCandidates.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+      const chunks = [];
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorder.ondataavailable = (e)=>{ if(e.data && e.data.size) chunks.push(e.data); };
+      const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+      recorder.start();
+      recIndicatorTxt.textContent = 'Merekam ' + durasi + ' detik...';
+      recIndicator.classList.add('show');
+      await delay(durasi * 1000);
+      if(recorder.state !== 'inactive') recorder.stop();
+      await stopped;
+      recIndicator.classList.remove('show');
+      closeCamera();
+      const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+      if(!blob.size) return { error: 'Gagal merekam video.' };
+      showMediaPreview(blob, 'video');
+      flashBadge('🎬 Video ' + durasi + ' detik selesai');
+      return { status: 'video_direkam', durasi_detik: durasi };
+    } catch(e){
+      recIndicator.classList.remove('show', 'focus');
+      closeCamera();
+      return { error: 'Gagal mengakses kamera: ' + e.message };
+    }
+  }
+
+  let pilihanKamera = 'belakang'; // 'belakang' | 'depan' — dipakai tombol foto/video fisik, diingat sampai halaman ditutup
+
+  function updateCamSwitchUI(){
+    const depan = pilihanKamera === 'depan';
+    camSwitchBtn.textContent = depan ? '🤳' : '🔄';
+    camSwitchBtn.classList.toggle('front', depan);
+    camSwitchBtn.title = 'Kamera aktif: ' + (depan ? 'depan' : 'belakang') + ' (tekan buat ganti)';
+    camBtn.title = 'Ambil foto (kamera ' + (depan ? 'depan' : 'belakang') + ')';
+    vidBtn.title = 'Rekam video (kamera ' + (depan ? 'depan' : 'belakang') + ')';
+  }
+  camSwitchBtn.addEventListener('click', ()=>{
+    pilihanKamera = pilihanKamera === 'depan' ? 'belakang' : 'depan';
+    updateCamSwitchUI();
+    flashBadge(pilihanKamera === 'depan' ? '🤳 Kamera depan dipilih' : '📷 Kamera belakang dipilih');
+  });
+  updateCamSwitchUI();
+
+  camBtn.addEventListener('click', ()=> ambilFoto(pilihanKamera));
+  vidBtn.addEventListener('click', ()=> rekamVideo(pilihanKamera));
+
+  let geminiApiKey = localStorage.getItem('loowi_geminiKey') || '';
+  let groqApiKey = localStorage.getItem('loowi_groqKey') || ''; // opsional, cadangan kalau Gemini gagal/kuota habis
+  let chatHistory = []; // {role:'user'|'model'|'function', parts:[...]}
+
+  const aiBtn = document.getElementById('aiBtn');
+  const aiChat = document.getElementById('aiChat');
+  const aiChatCloseBtn = document.getElementById('aiChatCloseBtn');
+  const aiChatSettingsBtn = document.getElementById('aiChatSettingsBtn');
+  const aiChatSetup = document.getElementById('aiChatSetup');
+  const aiChatBody = document.getElementById('aiChatBody');
+  const aiApiKeyInput = document.getElementById('aiApiKeyInput');
+  const aiApiKeySaveBtn = document.getElementById('aiApiKeySaveBtn');
+  const groqApiKeyInput = document.getElementById('groqApiKeyInput');
+  const aiChatLog = document.getElementById('aiChatLog');
+  const aiTyping = document.getElementById('aiTyping');
+  const aiChatInput = document.getElementById('aiChatInput');
+  const aiChatSendBtn = document.getElementById('aiChatSendBtn');
+  const aiChatMicBtn = document.getElementById('aiChatMicBtn');
+  const aiVoiceBtn = document.getElementById('aiVoiceBtn');
+
+  function updateAiSetupUI(){
+    const hasKeys = !!geminiApiKey; // Groq cuma cadangan opsional (dipakai otomatis kalau Gemini gagal)
+    aiChatSetup.style.display = hasKeys ? 'none' : 'block';
+    aiChatBody.classList.toggle('show', hasKeys);
+    // prefill kolom pakai key yang sudah tersimpan, biar gampang diedit tanpa ngetik ulang dari nol
+    aiApiKeyInput.value = geminiApiKey;
+    groqApiKeyInput.value = groqApiKey;
+  }
+  updateAiSetupUI();
+  // Begitu app dibuka, langsung tampilkan layar chat AI (bukan wajah robot) — biar
+  // pengalamannya kayak buka ChatGPT/Gemini: langsung bisa tanya-jawab tanpa tap apapun dulu.
+  // Tombol ✕ di pojok tetap ada kalau sewaktu-waktu mau lihat wajah MOMO / kontrol manual robot.
+  aiChat.classList.add('open'); aiBtn.classList.add('on');
+
+  aiBtn.addEventListener('click', ()=>{ aiChat.classList.add('open'); aiBtn.classList.add('on'); });
+  aiChatCloseBtn.addEventListener('click', ()=>{
+    aiChat.classList.remove('open'); aiBtn.classList.remove('on');
+    if('speechSynthesis' in window) window.speechSynthesis.cancel();
+  });
+  aiChatSettingsBtn.addEventListener('click', ()=>{
+    aiChatSetup.style.display = 'block';
+    aiChatBody.classList.remove('show');
+    aiApiKeyInput.value = geminiApiKey;
+    groqApiKeyInput.value = groqApiKey;
+  });
+
+  aiApiKeySaveBtn.addEventListener('click', ()=>{
+    const gKey = aiApiKeyInput.value.trim();
+    const qKey = groqApiKeyInput.value.trim();
+    if(!gKey){ showBanner('Isi dulu API Key Gemini sebelum disimpan (Groq boleh dikosongkan, sifatnya cadangan).'); return; }
+    geminiApiKey = gKey;
+    groqApiKey = qKey;
+    localStorage.setItem('loowi_geminiKey', geminiApiKey);
+    localStorage.setItem('loowi_groqKey', groqApiKey);
+    updateAiSetupUI();
+  });
+
+  // ---- Suara balasan AI (Text-to-Speech bawaan browser) ----
+  let aiVoiceOn = localStorage.getItem('loowi_aiVoice') !== 'off'; // default: nyala
+  aiVoiceBtn.textContent = aiVoiceOn ? '🔊' : '🔇';
+  if(!('speechSynthesis' in window)){
+    aiVoiceBtn.title = 'Browser ini tidak mendukung suara balasan AI';
+    aiVoiceBtn.disabled = true;
+  }
+  aiVoiceBtn.addEventListener('click', ()=>{
+    aiVoiceOn = !aiVoiceOn;
+    localStorage.setItem('loowi_aiVoice', aiVoiceOn ? 'on' : 'off');
+    aiVoiceBtn.textContent = aiVoiceOn ? '🔊' : '🔇';
+    if(aiVoiceOn){ speakText('Suara Momo aktif'); }
+    else if('speechSynthesis' in window){ window.speechSynthesis.cancel(); }
+  });
+  let currentUtterance = null; // simpan referensi biar utterance tidak "dibuang" Chrome sebelum sempat bicara (bug lama Chrome)
+
+  function pickIdVoice(){
+    const voices = window.speechSynthesis.getVoices() || [];
+    return voices.find(v => v.lang && v.lang.toLowerCase().startsWith('id')) || null;
+  }
+
+  function speakText(text){
+    if(!aiVoiceOn || !('speechSynthesis' in window)) return;
+    try{
+      window.speechSynthesis.cancel(); // hentikan yang lagi ngomong biar tidak numpuk
+      // beri jeda sedikit setelah cancel() -> workaround bug Chrome yang kadang diam kalau speak() dipanggil langsung setelah cancel()
+      setTimeout(()=>{
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = 'id-ID';
+        utter.rate = 1.0;
+        const idVoice = pickIdVoice();
+        if(idVoice) utter.voice = idVoice; // pakai suara Bahasa Indonesia kalau tersedia di HP
+        utter.onstart = ()=>{
+          isSpeaking = true;
+          pauseListeningForTts(); // mikrofon dimatikan sebentar biar suara MOMO sendiri tidak terdengar lagi olehnya
+        };
+        utter.onend = ()=>{
+          isSpeaking = false;
+          resumeListeningAfterTts();
+        };
+        utter.onerror = (e)=>{
+          isSpeaking = false;
+          resumeListeningAfterTts();
+          showBanner('Suara AI gagal diputar (' + (e.error || 'tidak diketahui') + '). Cek volume media HP & mesin TTS di Pengaturan Android (Setelan > Sistem > Bahasa & masukan > Text-to-speech).');
+        };
+        currentUtterance = utter; // simpan referensi supaya tidak ke-garbage-collect sebelum selesai bicara
+        window.speechSynthesis.speak(utter);
+      }, 80);
+    } catch(e){
+      showBanner('Suara AI gagal diputar: ' + e.message);
+    }
+  }
+
+  // Beberapa browser baru mengisi daftar suara secara async — muat ulang begitu siap
+  if('speechSynthesis' in window){
+    window.speechSynthesis.onvoiceschanged = () => { pickIdVoice(); };
+  }
+
+  function addChatBubble(role, text){
+    const div = document.createElement('div');
+    div.className = 'aiMsg ' + role;
+    div.textContent = text;
+    aiChatLog.appendChild(div);
+    aiChatLog.scrollTop = aiChatLog.scrollHeight;
+    if(role === 'ai') speakText(text);
+  }
+
+  function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+  // Semua panggilan ke server AI wajib lewat sini — kalau server tidak merespons sama sekali
+  // dalam batas waktu tertentu (jaringan lambat/terblokir/putus), permintaan dibatalkan otomatis
+  // dan dilempar sebagai error yang jelas, alih-alih menggantung selamanya di "sedang mengetik...".
+  async function fetchWithTimeout(url, options, timeoutMs){
+    const controller = new AbortController();
+    const timer = setTimeout(()=> controller.abort(), timeoutMs);
+    try{
+      return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+    } catch(err){
+      if(err.name === 'AbortError'){
+        throw new Error('Waktu tunggu habis (' + Math.round(timeoutMs/1000) + ' detik) — server AI tidak merespons. Cek koneksi internet HP kamu lalu coba lagi.');
+      }
+      throw new Error('Gagal terhubung ke server AI (' + err.message + ') — cek koneksi internet HP kamu.');
+    } finally{
+      clearTimeout(timer);
+    }
+  }
+
+  // Ambil saran "tunggu berapa lama" dari error 429 Google (dari field retryDelay ATAU dari teks pesannya)
+  function parseRetryDelaySeconds(errJson){
+    try{
+      const details = errJson?.error?.details || [];
+      for(const d of details){
+        if(d.retryDelay){
+          const m = String(d.retryDelay).match(/([\d.]+)/);
+          if(m) return parseFloat(m[1]);
+        }
+      }
+    } catch(e){}
+    const msg = errJson?.error?.message || '';
+    const m2 = msg.match(/retry in ([\d.]+)\s*s/i);
+    return m2 ? parseFloat(m2[1]) : null;
+  }
+
+  async function callGemini(contents){
+    const maxRetry = 3;
+    let lastErr = null;
+    for(let attempt = 0; attempt <= maxRetry; attempt++){
+      const res = await fetchWithTimeout(GEMINI_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: GEMINI_SYSTEM_PROMPT }] },
+          contents: contents,
+          tools: [{ functionDeclarations: [ROBOT_FUNCTION_DECL, WAKTU_FUNCTION_DECL, CUACA_FUNCTION_DECL, LOKASI_FUNCTION_DECL, NAVIGASI_MULAI_FUNCTION_DECL, NAVIGASI_STOP_FUNCTION_DECL, AMBIL_FOTO_FUNCTION_DECL, REKAM_VIDEO_FUNCTION_DECL] }]
+        })
+      }, 20000);
+      if(res.ok) return res.json();
+
+      let errJson = null;
+      try{ errJson = await res.json(); }catch(e){}
+      const detail = errJson?.error?.message || '';
+      lastErr = new Error('HTTP ' + res.status + (detail ? ' — ' + detail : ''));
+
+      // 503 = server Google lagi penuh, 429 = kena limit -> coba lagi otomatis (kalau masih masuk akal ditunggu)
+      const bisaCobaLagi = (res.status === 503 || res.status === 429) && attempt < maxRetry;
+      if(!bisaCobaLagi) throw lastErr;
+
+      let waitMs;
+      if(res.status === 429){
+        const saranDetik = parseRetryDelaySeconds(errJson);
+        // pakai saran waktu tunggu dari Google kalau ada, dibatasi maksimal 60 detik biar tidak nunggu kelamaan
+        waitMs = saranDetik ? Math.min(saranDetik * 1000 + 500, 60000) : 15000 * (attempt + 1);
+        aiTyping.textContent = 'Kuota AI lagi penuh, menunggu ' + Math.ceil(waitMs / 1000) + ' detik...';
+      } else {
+        waitMs = 1200 * (attempt + 1);
+        aiTyping.textContent = 'Server AI lagi sibuk, mencoba lagi...';
+      }
+      await delay(waitMs);
+    }
+    throw lastErr;
+  }
+
+  // Ubah balasan Gemini jadi bentuk parts standar {text?, functionCall?:{name,args,id}}
+  function extractGeminiParts(data){
+    const candidate = data?.candidates?.[0];
+    return { parts: candidate?.content?.parts || [], finishReason: candidate?.finishReason };
+  }
+
+  // Susun ulang riwayat chat (format Gemini) jadi format "messages" ala OpenAI/Groq
+  function buildGroqMessages(contents){
+    const messages = [{ role: 'system', content: GEMINI_SYSTEM_PROMPT }];
+    let pendingCallIds = []; // id tool_call dari balasan model sebelumnya, dipakai berurutan buat pasangan hasil eksekusinya
+    let callCounter = 0;
+    for(const turn of contents){
+      if(turn.role === 'model'){
+        const textJoined = turn.parts.filter(p => p.text).map(p => p.text).join('\n');
+        const toolCalls = [];
+        pendingCallIds = [];
+        for(const p of turn.parts){
+          if(p.functionCall){
+            const id = p.functionCall.id || ('call_' + (++callCounter));
+            toolCalls.push({ id, type: 'function', function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) } });
+            pendingCallIds.push(id);
+          }
+        }
+        const msg = { role: 'assistant', content: textJoined || null };
+        if(toolCalls.length) msg.tool_calls = toolCalls;
+        messages.push(msg);
+      } else {
+        for(const part of turn.parts){
+          if(part.text){
+            messages.push({ role: 'user', content: part.text });
+          } else if(part.functionResponse){
+            const id = pendingCallIds.length ? pendingCallIds.shift() : (part.functionResponse.id || part.functionResponse.name);
+            messages.push({ role: 'tool', tool_call_id: id, content: JSON.stringify(part.functionResponse.response) });
+          }
+        }
+      }
+    }
+    return messages;
+  }
+
+  // Ubah balasan Groq (format OpenAI) jadi bentuk parts standar yang sama dengan extractGeminiParts
+  function extractGroqParts(data){
+    const choice = data?.choices?.[0];
+    const message = choice?.message;
+    const parts = [];
+    if(message?.content) parts.push({ text: message.content });
+    for(const tc of (message?.tool_calls || [])){
+      let args = {};
+      try{ args = JSON.parse(tc.function.arguments || '{}'); }catch(e){}
+      parts.push({ functionCall: { name: tc.function.name, args, id: tc.id } });
+    }
+    return { parts, finishReason: choice?.finish_reason };
+  }
+
+  async function callGroq(contents){
+    const maxRetry = 2;
+    let lastErr = null;
+    const messages = buildGroqMessages(contents);
+    const tools = [
+      { type: 'function', function: ROBOT_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: WAKTU_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: CUACA_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: LOKASI_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: NAVIGASI_MULAI_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: NAVIGASI_STOP_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: AMBIL_FOTO_FUNCTION_DECL_OPENAI },
+      { type: 'function', function: REKAM_VIDEO_FUNCTION_DECL_OPENAI }
+    ];
+    for(let attempt = 0; attempt <= maxRetry; attempt++){
+      const res = await fetchWithTimeout(GROQ_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqApiKey },
+        body: JSON.stringify({ model: GROQ_MODEL, messages, tools, tool_choice: 'auto' })
+      }, 20000);
+      if(res.ok) return res.json();
+
+      let errJson = null;
+      try{ errJson = await res.json(); }catch(e){}
+      const detail = errJson?.error?.message || '';
+      lastErr = new Error('HTTP ' + res.status + (detail ? ' — ' + detail : ''));
+
+      const bisaCobaLagi = (res.status === 503 || res.status === 429) && attempt < maxRetry;
+      if(!bisaCobaLagi) throw lastErr;
+      await delay(1500 * (attempt + 1));
+    }
+    throw lastErr;
+  }
+
+  async function sendChatMessage(text){
+    text = text.trim();
+    if(!text) return;
+    if(!geminiApiKey){ aiChatSetup.style.display = 'block'; aiChatBody.classList.remove('show'); return; }
+
+    addChatBubble('user', text);
+    const historySnapshot = chatHistory.length; // titik aman buat dikembalikan kalau gagal di tengah jalan
+    chatHistory.push({ role:'user', parts:[{ text }] });
+    aiTyping.textContent = 'MOMO sedang mengetik...';
+    aiTyping.style.display = 'block';
+    aiChatSendBtn.disabled = true;
+    aiBusy = true;
+
+    let provider = 'gemini'; // otomatis pindah ke 'groq' kalau Gemini gagal & key Groq tersedia
+
+    try{
+      const maxRounds = 5; // batas jaga-jaga kalau AI terus-terusan manggil aksi berantai
+      for(let round = 0; round < maxRounds; round++){
+        let extracted;
+        try{
+          if(provider === 'gemini'){
+            const resp = await callGemini(chatHistory);
+            extracted = extractGeminiParts(resp);
+          } else {
+            const resp = await callGroq(chatHistory);
+            extracted = extractGroqParts(resp);
+          }
+        } catch(errCall){
+          if(provider === 'gemini' && groqApiKey){
+            provider = 'groq';
+            addChatBubble('system', '⚠️ Gemini gagal (' + errCall.message + ') — coba lewat AI cadangan (Groq)...');
+            round--; // ulangi ronde ini pakai provider baru, tidak menghitung jatah round
+            continue;
+          }
+          throw errCall;
+        }
+
+        const parts = extracted.parts;
+        if(!parts || parts.length === 0){
+          throw new Error(extracted.finishReason ? ('tidak ada balasan (alasan: ' + extracted.finishReason + ')') : 'tidak ada balasan dari AI');
+        }
+
+        chatHistory.push({ role:'model', parts });
+
+        let hasFunctionCall = false;
+        for(const p of parts){
+          if(p.text) addChatBubble('ai', p.text);
+          if(p.functionCall){
+            hasFunctionCall = true;
+            const fname = p.functionCall.name;
+            let responseData;
+            if(fname === 'kendalikan_robot'){
+              const aksi = p.functionCall.args?.aksi;
+              const code = AKSI_TO_CODE[aksi];
+              if(code){
+                const sent = sendCommand(code);
+                reactFaceTo(code);
+                addChatBubble('system', '🤖 ' + (AKSI_LABEL[aksi] || aksi) + (sent ? '' : ' · tidak terkirim (belum tersambung)'));
+              }
+              responseData = { status: code ? 'ok' : 'aksi_tidak_dikenal' };
+            } else if(fname === 'cek_waktu'){
+              responseData = await cekWaktu();
+            } else if(fname === 'cek_cuaca'){
+              responseData = await cekCuaca(p.functionCall.args?.kota);
+            } else if(fname === 'cek_lokasi_saya'){
+              responseData = await cekLokasiSaya();
+            } else if(fname === 'mulai_navigasi'){
+              responseData = await mulaiNavigasi(p.functionCall.args?.tujuan);
+            } else if(fname === 'stop_navigasi'){
+              responseData = hentikanNavigasi();
+            } else if(fname === 'ambil_foto'){
+              responseData = await ambilFoto(p.functionCall.args?.kamera);
+            } else if(fname === 'rekam_video'){
+              responseData = await rekamVideo(p.functionCall.args?.kamera, p.functionCall.args?.durasi_detik);
+            } else {
+              responseData = { status: 'fungsi_tidak_dikenal' };
+            }
+            const funcResponsePart = { name: fname, response: responseData };
+            if(p.functionCall.id) funcResponsePart.id = p.functionCall.id; // Gemini 3 menyertakan id per pemanggilan fungsi
+            chatHistory.push({
+              role:'user', // API sekarang menolak role 'function' — hasil fungsi dikirim balik lewat role 'user'
+              parts:[{ functionResponse: funcResponsePart }]
+            });
+          }
+        }
+
+        if(!hasFunctionCall) break; // sudah selesai — tidak ada aksi susulan yang perlu ditunggu balasannya
+      }
+    } catch(err){
+      chatHistory.length = historySnapshot; // batalkan perubahan history di percobaan ini biar tidak nyangkut rusak utk pesan berikutnya
+      addChatBubble('system', 'Gagal menghubungi AI: ' + err.message);
+    } finally{
+      aiTyping.style.display = 'none';
+      aiChatSendBtn.disabled = false;
+      aiBusy = false;
+    }
+  }
+
+  aiChatSendBtn.addEventListener('click', ()=>{
+    const text = aiChatInput.value;
+    aiChatInput.value = '';
+    sendChatMessage(text);
+  });
+  aiChatInput.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){ e.preventDefault(); aiChatSendBtn.click(); }
+  });
+
+  // ---- Mikrofon khusus untuk dikte pesan chat (sekali ngomong, bukan mode terus-menerus) ----
+  let aiRecognition = null;
+  if(SpeechRecognition){
+    aiRecognition = new SpeechRecognition();
+    aiRecognition.lang = 'id-ID';
+    aiRecognition.continuous = false;
+    aiRecognition.interimResults = false;
+    aiRecognition.onresult = (e)=>{
+      const text = e.results[0][0].transcript;
+      aiChatInput.value = text;
+      sendChatMessage(text);
+      aiChatInput.value = '';
+    };
+    aiRecognition.onend = ()=> aiChatMicBtn.classList.remove('on');
+    aiRecognition.onerror = ()=> aiChatMicBtn.classList.remove('on');
+  }
+  aiChatMicBtn.addEventListener('click', ()=>{
+    if(!aiRecognition){ showBanner('Browser ini tidak mendukung dikte suara. Ketik saja pesannya.'); return; }
+    if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    try{
+      aiRecognition.start();
+      aiChatMicBtn.classList.add('on');
+    } catch(e){ /* sudah berjalan, abaikan */ }
+  });
+
+  /* ======================================================
+     BAGIAN 4 — Panel geser (transkrip/riwayat/kata kunci)
+     ====================================================== */
+  const panel = document.getElementById('panel');
+  const panelBtn = document.getElementById('panelBtn');
+  panelBtn.addEventListener('click', ()=> panel.classList.toggle('open'));
+})();
+</script>
+</body>
+</html>
